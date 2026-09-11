@@ -196,6 +196,32 @@ func (c *Controller) UpdateBranchStatus(w http.ResponseWriter, r *http.Request) 
 	ok(w, map[string]any{"branch_id": *scoped, "is_open": req.IsOpen})
 }
 
+func (c *Controller) UpdateBranchProfile(w http.ResponseWriter, r *http.Request) {
+	branchID, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	scoped, err := service.ResolveBranchScope(actor(r), &branchID)
+	if err != nil || scoped == nil {
+		writeError(w, apperror.ErrForbidden)
+		return
+	}
+
+	var req dto.UpdateBranchProfileRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	branch, err := c.svc.UpdateBranchProfile(r.Context(), *scoped, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, branch)
+}
+
 // ---------------------------------------------------------------------
 // Menu & categories
 // ---------------------------------------------------------------------

@@ -130,6 +130,7 @@ func registerRESTRoutes(
 		admin.Get("/api/v1/admin/settings", ctrl.GetBranchSettings)
 		admin.Put("/api/v1/admin/settings", ctrl.UpdateBranchSettings)
 		admin.Put("/api/v1/admin/branches/{id}/status", ctrl.UpdateBranchStatus)
+		admin.Put("/api/v1/admin/branches/{id}/profile", ctrl.UpdateBranchProfile)
 
 		admin.Post("/api/v1/admin/upload", ctrl.UploadImage)
 	})

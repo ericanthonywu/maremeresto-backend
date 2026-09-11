@@ -1,9 +1,13 @@
 -- Seed branches
+-- Phone is left blank on purpose: fill it in via the admin "Profil Outlet"
+-- editor (PUT /api/v1/admin/branches/{id}/profile) rather than hardcoding a
+-- fake number here. Coordinates are district-level (geocoded from the
+-- street address); refine them from the same admin editor if needed.
 INSERT INTO branches (id, slug, name, address, phone, latitude, longitude, gradient_theme, icon, facility_tags, rating, is_open)
 VALUES
-    ('11111111-1111-1111-1111-111111111111', 'sudirman', 'Cafe Olga Sudirman', 'Jl. Jend. Sudirman No. 45, Gedung Plaza Central, Jakarta Pusat', '021-5550-0101', -6.2088, 106.8216, 'brand', 'fa-building', '["WiFi Cepat", "Full AC", "Parkir Valet"]'::jsonb, 4.8, true),
-    ('22222222-2222-2222-2222-222222222222', 'kemang', 'Cafe Olga Kemang', 'Jl. Kemang Raya No. 12, Mampang Prapatan, Jakarta Selatan', '021-5550-0202', -6.2636, 106.8171, 'emerald', 'fa-tree', '["Outdoor Garden", "Pet Friendly", "Banyak Colokan"]'::jsonb, 4.9, true),
-    ('33333333-3333-3333-3333-333333333333', 'bsd', 'Cafe Olga BSD City', 'Jl. Pahlawan Seribu No. 8, BSD Green Office Park, BSD City', '021-5550-0303', -6.3022, 106.6527, 'indigo', 'fa-city', '["Meeting Room", "Luas Parkir", "Manual Brew Bar"]'::jsonb, 4.7, true)
+    ('11111111-1111-1111-1111-111111111111', 'kerten', 'Mareme Kerten', 'Jl. Samratulangi No. 65, Kerten, Kec. Laweyan, Kota Surakarta, Jawa Tengah 57143', '', -7.5569518, 110.7941911, 'brand', 'fa-building', '["WiFi Cepat", "Full AC", "Parkir Motor"]'::jsonb, 4.8, true),
+    ('22222222-2222-2222-2222-222222222222', 'makamhaji', 'Mareme Makamhaji', 'Jl. Slamet Riyadi No. 456, Dusun I, Makamhaji, Kec. Kartasura, Kabupaten Sukoharjo, Jawa Tengah 57147', '', -7.5691693, 110.7831776, 'emerald', 'fa-tree', '["Outdoor Seating", "Parkir Luas", "Mushola"]'::jsonb, 4.9, true),
+    ('33333333-3333-3333-3333-333333333333', 'mak-djan', 'Mak Djan', 'Jl. R. M. Said No. 54A, Ketelan, Kec. Banjarsari, Kota Surakarta, Jawa Tengah 57132', '', -7.5621624, 110.8204339, 'indigo', 'fa-city', '["Dine In", "Parkir Motor", "Free WiFi"]'::jsonb, 4.7, true)
 ON CONFLICT (slug) DO NOTHING;
 
 -- Seed branch settings

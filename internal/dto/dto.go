@@ -346,6 +346,46 @@ func (r *UpdateBranchSettingsRequest) Validate() error {
 
 var clockPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
+// UpdateBranchProfileRequest edits the branch's public-facing identity
+// (name/address/contact/coordinates) as distinct from its operational
+// settings (hours, fees). Latitude/longitude are typically supplied by the
+// same geocoder the customer app uses, so the delivery-fee calculation
+// stays consistent with what the address says.
+type UpdateBranchProfileRequest struct {
+	Name      string  `json:"name"`
+	Address   string  `json:"address"`
+	Phone     string  `json:"phone"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+func (r *UpdateBranchProfileRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	r.Address = strings.TrimSpace(r.Address)
+	r.Phone = strings.TrimSpace(r.Phone)
+
+	if r.Name == "" || len(r.Name) > 100 {
+		return apperror.Invalid("nama outlet wajib diisi, maksimal 100 karakter")
+	}
+	if r.Address == "" || len(r.Address) > 2000 {
+		return apperror.Invalid("alamat outlet wajib diisi")
+	}
+	if r.Phone != "" {
+		normalized, err := NormalizeIndonesianPhone(r.Phone)
+		if err != nil {
+			return apperror.Invalid("nomor telepon outlet tidak valid")
+		}
+		r.Phone = normalized
+	}
+	if r.Latitude < -90 || r.Latitude > 90 || r.Longitude < -180 || r.Longitude > 180 {
+		return apperror.Invalid("koordinat outlet tidak valid")
+	}
+	if r.Latitude == 0 && r.Longitude == 0 {
+		return apperror.Invalid("koordinat outlet wajib ditentukan melalui pencarian alamat")
+	}
+	return nil
+}
+
 type CommonResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`

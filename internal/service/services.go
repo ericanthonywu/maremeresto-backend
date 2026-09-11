@@ -1324,6 +1324,20 @@ func (s *Service) UpdateBranchStatus(ctx context.Context, branchID uuid.UUID, is
 	return s.repo.UpdateBranchStatus(ctx, branchID, isOpen)
 }
 
+// UpdateBranchProfile lets a branch_admin (own outlet) or owner (any outlet)
+// correct the outlet's public identity. This replaced the previous state
+// where name/address/phone/coordinates could only be set once, at seed time,
+// with no way to fix leftover placeholder data short of a manual DB edit.
+func (s *Service) UpdateBranchProfile(ctx context.Context, branchID uuid.UUID, req *dto.UpdateBranchProfileRequest) (*model.Branch, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateBranchProfile(ctx, branchID, req.Name, req.Address, req.Phone, req.Latitude, req.Longitude); err != nil {
+		return nil, err
+	}
+	return s.repo.FindBranchByID(ctx, branchID)
+}
+
 // ---------------------------------------------------------------------
 // Upload Service (With Auto-Compression)
 // ---------------------------------------------------------------------

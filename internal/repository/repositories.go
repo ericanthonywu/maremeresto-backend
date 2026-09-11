@@ -158,6 +158,12 @@ func (r *Repository) UpdateBranchStatus(ctx context.Context, id uuid.UUID, isOpe
 	return err
 }
 
+func (r *Repository) UpdateBranchProfile(ctx context.Context, id uuid.UUID, name, address, phone string, lat, lon float64) error {
+	query := `UPDATE branches SET name = $1, address = $2, phone = $3, latitude = $4, longitude = $5, updated_at = NOW() WHERE id = $6`
+	_, err := r.db.Exec(ctx, query, name, address, phone, lat, lon, id)
+	return err
+}
+
 // ---------------------------------------------------------------------
 // Menu & Category Repository
 // ---------------------------------------------------------------------
