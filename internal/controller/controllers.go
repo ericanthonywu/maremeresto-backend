@@ -2,10 +2,14 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/middleware"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/service"
@@ -14,40 +18,92 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxJSONBody caps request bodies so a single client cannot exhaust memory.
+const maxJSONBody = 1 << 20 // 1 MiB
+
 type Controller struct {
 	svc *service.Service
 	hub *ws.Hub
+	cfg *config.Config
 }
 
-func NewController(svc *service.Service, hub *ws.Hub) *Controller {
-	return &Controller{
-		svc: svc,
-		hub: hub,
-	}
+func NewController(svc *service.Service, hub *ws.Hub, cfg *config.Config) *Controller {
+	return &Controller{svc: svc, hub: hub, cfg: cfg}
 }
 
+// ---------------------------------------------------------------------
 // Helpers
+// ---------------------------------------------------------------------
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
 
+func ok(w http.ResponseWriter, data any) {
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": data})
+}
+
 func writeError(w http.ResponseWriter, err error) {
 	appErr := apperror.FromError(err)
-	writeJSON(w, appErr.Code, map[string]any{
-		"success": false,
-		"error":   appErr.Message,
-	})
+	writeJSON(w, appErr.Code, map[string]any{"success": false, "error": appErr.Error()})
+}
+
+// decode reads a JSON body, rejecting oversized payloads and unknown fields so
+// a typo in the client surfaces as an error rather than a silently ignored value.
+func decode(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return apperror.Invalid("data yang dikirim terlalu besar")
+		}
+		return apperror.Invalid("format data tidak valid")
+	}
+	// Reject trailing content after the JSON document.
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return apperror.Invalid("format data tidak valid")
+	}
+	return nil
+}
+
+func urlUUID(r *http.Request, key string) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, key))
+	if err != nil {
+		return uuid.Nil, apperror.Invalid("identitas tidak valid")
+	}
+	return id, nil
+}
+
+func queryUUID(r *http.Request, key string) (*uuid.UUID, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, apperror.Invalid("parameter " + key + " tidak valid")
+	}
+	return &id, nil
+}
+
+func actor(r *http.Request) *middleware.JWTClaims {
+	claims, _ := middleware.GetUserFromContext(r.Context())
+	return claims
 }
 
 // ---------------------------------------------------------------------
-// Auth Handlers
+// Auth
 // ---------------------------------------------------------------------
+
 func (c *Controller) CustomerPhoneLogin(w http.ResponseWriter, r *http.Request) {
 	var req dto.CustomerPhoneLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -56,17 +112,13 @@ func (c *Controller) CustomerPhoneLogin(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    resp,
-	})
+	ok(w, resp)
 }
 
 func (c *Controller) AdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req dto.AdminLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -75,67 +127,56 @@ func (c *Controller) AdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    resp,
-	})
+	ok(w, resp)
 }
 
 func (c *Controller) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
-	claims, ok := middleware.GetUserFromContext(r.Context())
-	if !ok {
+	claims := actor(r)
+	if claims == nil {
 		writeError(w, apperror.ErrUnauthorized)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    claims,
+	// Return only the identity fields; the raw claims carry JWT metadata that
+	// the client has no use for.
+	ok(w, dto.UserSummary{
+		ID:       claims.UserID,
+		Phone:    claims.Phone,
+		Role:     claims.Role,
+		BranchID: claims.BranchID,
 	})
 }
 
 // ---------------------------------------------------------------------
-// Branch Handlers
+// Branches
 // ---------------------------------------------------------------------
+
 func (c *Controller) ListBranches(w http.ResponseWriter, r *http.Request) {
 	branches, err := c.svc.ListBranches(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    branches,
-	})
+	ok(w, branches)
 }
 
 func (c *Controller) GetBranch(w http.ResponseWriter, r *http.Request) {
-	slug := chi.URLParam(r, "slug")
-	branch, err := c.svc.GetBranchBySlug(r.Context(), slug)
+	branch, err := c.svc.GetBranchBySlug(r.Context(), chi.URLParam(r, "slug"))
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    branch,
-	})
+	ok(w, branch)
 }
 
 func (c *Controller) UpdateBranchStatus(w http.ResponseWriter, r *http.Request) {
-	claims, _ := middleware.GetUserFromContext(r.Context())
-	branchIDStr := chi.URLParam(r, "id")
-	branchID, err := uuid.Parse(branchIDStr)
+	branchID, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, err)
 		return
 	}
-
-	// Branch isolation check
-	if claims.Role == "branch_admin" && (claims.BranchID == nil || *claims.BranchID != branchID) {
+	scoped, err := service.ResolveBranchScope(actor(r), &branchID)
+	if err != nil || scoped == nil {
 		writeError(w, apperror.ErrForbidden)
 		return
 	}
@@ -143,48 +184,39 @@ func (c *Controller) UpdateBranchStatus(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		IsOpen bool `json:"is_open"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.UpdateBranchStatus(r.Context(), branchID, req.IsOpen); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Branch status updated successfully",
-	})
+	if err := c.svc.UpdateBranchStatus(r.Context(), *scoped, req.IsOpen); err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"branch_id": *scoped, "is_open": req.IsOpen})
 }
 
 // ---------------------------------------------------------------------
-// Menu & Category Handlers
+// Menu & categories
 // ---------------------------------------------------------------------
+
 func (c *Controller) ListCategories(w http.ResponseWriter, r *http.Request) {
 	categories, err := c.svc.ListCategories(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    categories,
-	})
+	ok(w, categories)
 }
 
 func (c *Controller) ListMenuByBranch(w http.ResponseWriter, r *http.Request) {
 	slugOrID := chi.URLParam(r, "branch")
-	var branchID uuid.UUID
 
-	if parsedID, err := uuid.Parse(slugOrID); err == nil {
-		branchID = parsedID
-	} else {
-		b, err := c.svc.GetBranchBySlug(r.Context(), slugOrID)
-		if err != nil {
-			writeError(w, err)
+	branchID, err := uuid.Parse(slugOrID)
+	if err != nil {
+		b, lookupErr := c.svc.GetBranchBySlug(r.Context(), slugOrID)
+		if lookupErr != nil {
+			writeError(w, lookupErr)
 			return
 		}
 		branchID = b.ID
@@ -195,119 +227,136 @@ func (c *Controller) ListMenuByBranch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    items,
-	})
+	ok(w, items)
 }
 
 func (c *Controller) CreateMenuItem(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateMenuItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	claims, _ := middleware.GetUserFromContext(r.Context())
-	if claims.Role == "branch_admin" && claims.BranchID != nil {
-		req.BranchID = *claims.BranchID
-	}
-
-	item, err := c.svc.CreateMenuItem(r.Context(), &req)
-	if err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"data":    item,
-	})
+	item, err := c.svc.CreateMenuItem(r.Context(), actor(r), &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": item})
 }
 
 func (c *Controller) UpdateMenuItem(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, err)
 		return
 	}
 
 	var req dto.UpdateMenuItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	item, err := c.svc.UpdateMenuItem(r.Context(), id, &req)
-	if err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    item,
-	})
+	item, err := c.svc.UpdateMenuItem(r.Context(), actor(r), id, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, item)
 }
 
 func (c *Controller) ToggleMenuItemAvailability(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, err)
 		return
 	}
 
 	var req dto.ToggleAvailabilityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.ToggleMenuAvailability(r.Context(), id, req.IsAvailable); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Availability updated",
-	})
+	if err := c.svc.ToggleMenuAvailability(r.Context(), actor(r), id, req.IsAvailable); err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"id": id, "is_available": req.IsAvailable})
 }
 
 func (c *Controller) DeleteMenuItem(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.DeleteMenuItem(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Item deleted",
-	})
+	if err := c.svc.DeleteMenuItem(r.Context(), actor(r), id); err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"id": id})
 }
 
 // ---------------------------------------------------------------------
-// Order Handlers
+// Delivery quoting & geocoding
 // ---------------------------------------------------------------------
+
+func (c *Controller) QuoteDelivery(w http.ResponseWriter, r *http.Request) {
+	var req dto.DeliveryQuoteRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	quote, err := c.svc.QuoteDelivery(r.Context(), &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, quote)
+}
+
+func (c *Controller) SearchAddress(w http.ResponseWriter, r *http.Request) {
+	results, err := c.svc.SearchAddress(r.Context(), r.URL.Query().Get("q"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, results)
+}
+
+func (c *Controller) ReverseGeocode(w http.ResponseWriter, r *http.Request) {
+	lat, errLat := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
+	lon, errLon := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
+	if errLat != nil || errLon != nil {
+		writeError(w, apperror.Invalid("koordinat tidak valid"))
+		return
+	}
+
+	result, err := c.svc.ReverseGeocode(r.Context(), lat, lon)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, result)
+}
+
+// ---------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------
+
 func (c *Controller) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 
 	var userID *uuid.UUID
-	if claims, ok := middleware.GetUserFromContext(r.Context()); ok {
+	if claims := actor(r); claims != nil {
 		userID = &claims.UserID
 	}
 
@@ -316,18 +365,16 @@ func (c *Controller) CreateOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"data":    order,
-	})
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": order})
 }
 
+// GetOrder is restricted to the customer who placed the order and to staff of
+// the branch fulfilling it. It used to be fully public, so anyone holding an
+// order id could read the customer's name, phone number and home address.
 func (c *Controller) GetOrder(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, err)
 		return
 	}
 
@@ -336,33 +383,55 @@ func (c *Controller) GetOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if !c.svc.CanAccessOrder(actor(r), order) {
+		// 404 rather than 403: confirming an id exists is itself a small leak.
+		writeError(w, apperror.ErrNotFound)
+		return
+	}
+	ok(w, order)
+}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    order,
-	})
+func (c *Controller) ListMyOrders(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	if claims == nil {
+		writeError(w, apperror.ErrUnauthorized)
+		return
+	}
+
+	limit, offset := paging(r)
+	orders, total, err := c.svc.ListOrdersForCustomer(r.Context(), claims.UserID, limit, offset)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": orders, "total": total})
 }
 
 func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
-	status := r.URL.Query().Get("status")
-	search := r.URL.Query().Get("search")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	var branchID *uuid.UUID
-	if bStr := r.URL.Query().Get("branch_id"); bStr != "" {
-		if bid, err := uuid.Parse(bStr); err == nil {
-			branchID = &bid
-		}
+	requested, err := queryUUID(r, "branch_id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	branchID, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
 
-	// Branch admin scope enforcement
-	claims, ok := middleware.GetUserFromContext(r.Context())
-	if ok && claims.Role == "branch_admin" && claims.BranchID != nil {
-		branchID = claims.BranchID
+	limit, offset := paging(r)
+	orders, total, err := c.svc.ListOrders(
+		r.Context(), branchID,
+		r.URL.Query().Get("status"),
+		r.URL.Query().Get("search"),
+		limit, offset,
+	)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
 
-	orders, total, err := c.svc.ListOrders(r.Context(), branchID, status, search, limit, offset)
+	unread, err := c.svc.CountUnacknowledgedOrders(r.Context(), branchID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -372,69 +441,181 @@ func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"data":    orders,
 		"total":   total,
+		"unread":  unread,
 	})
 }
 
+func paging(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (c *Controller) UpdateOrderStatus(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, err)
 		return
 	}
 
 	var req dto.UpdateOrderStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.UpdateOrderStatus(r.Context(), id, req.Status, req.RejectionReason, req.ExpectedVersion); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Order status updated",
-	})
+	// Staff may only act on orders belonging to their own branch.
+	existing, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), existing) {
+		writeError(w, apperror.ErrForbidden)
+		return
+	}
+
+	order, err := c.svc.UpdateOrderStatus(r.Context(), id, req.Status, req.RejectionReason, req.ExpectedVersion)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, order)
+}
+
+func (c *Controller) AssignDriver(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req dto.AssignDriverRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	existing, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), existing) {
+		writeError(w, apperror.ErrForbidden)
+		return
+	}
+
+	order, err := c.svc.AssignDriver(r.Context(), id, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, order)
+}
+
+// AcknowledgeOrders clears the admin's unread badge. With no ids in the body
+// every unread order in scope is marked as seen.
+func (c *Controller) AcknowledgeOrders(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	branchID, err := service.ResolveBranchScope(claims, nil)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req struct {
+		OrderIDs []uuid.UUID `json:"order_ids"`
+	}
+	if r.ContentLength > 0 {
+		if err := decode(w, r, &req); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+
+	count, err := c.svc.AcknowledgeOrders(r.Context(), branchID, req.OrderIDs, claims.UserID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	unread, err := c.svc.CountUnacknowledgedOrders(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"acknowledged": count, "unread": unread})
 }
 
 func (c *Controller) CancelOrder(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
+	id, err := urlUUID(r, "id")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.CancelOrder(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Order cancelled successfully",
-	})
-}
-
-// ---------------------------------------------------------------------
-// Payment Handlers (Midtrans Integration + Webhook)
-// ---------------------------------------------------------------------
-func (c *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
-	var req dto.CreatePaymentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	// Only the customer who placed the order (or staff) may cancel it. This
+	// endpoint previously had no authentication at all.
+	existing, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), existing) {
+		writeError(w, apperror.ErrNotFound)
 		return
 	}
 
-	// If idempotency key not provided in body, check header
-	if req.IdempotencyKey == "" {
-		req.IdempotencyKey = r.Header.Get("Idempotency-Key")
+	order, err := c.svc.CancelOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
-	if req.IdempotencyKey == "" {
-		req.IdempotencyKey = uuid.NewString()
+	ok(w, order)
+}
+
+// ---------------------------------------------------------------------
+// Payments
+// ---------------------------------------------------------------------
+
+func (c *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
+	var req dto.CreatePaymentRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	// The header is authoritative; a body value is accepted for older clients.
+	if key := r.Header.Get("Idempotency-Key"); key != "" {
+		req.IdempotencyKey = key
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		writeError(w, apperror.Invalid("Idempotency-Key wajib dikirim untuk pembayaran"))
+		return
+	}
+	if len(req.IdempotencyKey) > 100 {
+		writeError(w, apperror.Invalid("Idempotency-Key terlalu panjang"))
+		return
+	}
+
+	existing, err := c.svc.GetOrder(r.Context(), req.OrderID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), existing) {
+		writeError(w, apperror.ErrNotFound)
+		return
 	}
 
 	payment, err := c.svc.CreatePayment(r.Context(), &req)
@@ -442,36 +623,72 @@ func (c *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	ok(w, payment)
+}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    payment,
+func (c *Controller) GetPaymentStatus(w http.ResponseWriter, r *http.Request) {
+	orderID, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	order, err := c.svc.GetOrder(r.Context(), orderID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), order) {
+		writeError(w, apperror.ErrNotFound)
+		return
+	}
+
+	payment, err := c.svc.GetPaymentForOrder(r.Context(), orderID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{
+		"order_status":   order.Status,
+		"payment_status": payment.Status,
+		"expires_at":     payment.ExpiresAt,
+		"paid_at":        payment.PaidAt,
+		"redirect_url":   payment.SnapRedirectURL,
+		"snap_token":     payment.SnapToken,
 	})
 }
 
 func (c *Controller) HandleMidtransNotification(w http.ResponseWriter, r *http.Request) {
 	var notification map[string]any
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	if err := json.NewDecoder(r.Body).Decode(&notification); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
 	if err := c.svc.HandleMidtransWebhook(r.Context(), notification); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Midtrans retries on a non-2xx. A bad signature is never going to
+		// become valid, so acknowledge it and stop the retry storm; genuine
+		// server faults still return 500 so the notification is redelivered.
+		if errors.Is(err, apperror.ErrUnauthorized) || errors.Is(err, apperror.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+			return
+		}
+		http.Error(w, "processing error", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // ---------------------------------------------------------------------
-// Promo Handlers
+// Promos
 // ---------------------------------------------------------------------
+
 func (c *Controller) ValidatePromo(w http.ResponseWriter, r *http.Request) {
 	var req dto.ValidatePromoRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
 		return
 	}
 
@@ -480,27 +697,18 @@ func (c *Controller) ValidatePromo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    resp,
-	})
+	ok(w, resp)
 }
 
 // ---------------------------------------------------------------------
-// Settings Handlers
+// Settings
 // ---------------------------------------------------------------------
-func (c *Controller) GetBranchSettings(w http.ResponseWriter, r *http.Request) {
-	claims, _ := middleware.GetUserFromContext(r.Context())
-	var branchID uuid.UUID
 
-	if bStr := r.URL.Query().Get("branch_id"); bStr != "" {
-		branchID, _ = uuid.Parse(bStr)
-	} else if claims != nil && claims.BranchID != nil {
-		branchID = *claims.BranchID
-	} else {
-		// Default to Sudirman
-		branchID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
+func (c *Controller) GetBranchSettings(w http.ResponseWriter, r *http.Request) {
+	branchID, err := c.resolveSettingsBranch(r)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
 
 	settings, err := c.svc.GetBranchSettings(r.Context(), branchID)
@@ -508,53 +716,64 @@ func (c *Controller) GetBranchSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    settings,
-	})
+	ok(w, settings)
 }
 
 func (c *Controller) UpdateBranchSettings(w http.ResponseWriter, r *http.Request) {
-	claims, _ := middleware.GetUserFromContext(r.Context())
-	var branchID uuid.UUID
-
-	if claims != nil && claims.BranchID != nil {
-		branchID = *claims.BranchID
-	} else {
-		branchID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	}
-
 	var req dto.UpdateBranchSettingsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apperror.ErrBadRequest)
-		return
-	}
-
-	if err := c.svc.UpdateBranchSettings(r.Context(), branchID, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "Settings updated",
-	})
+	scoped, err := service.ResolveBranchScope(actor(r), req.BranchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if scoped == nil {
+		writeError(w, apperror.Invalid("outlet wajib dipilih"))
+		return
+	}
+
+	settings, err := c.svc.UpdateBranchSettings(r.Context(), *scoped, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, settings)
+}
+
+// resolveSettingsBranch previously defaulted to a hardcoded branch UUID, so an
+// owner with no branch_id silently edited the Kerten outlet.
+func (c *Controller) resolveSettingsBranch(r *http.Request) (uuid.UUID, error) {
+	requested, err := queryUUID(r, "branch_id")
+	if err != nil {
+		return uuid.Nil, err
+	}
+	scoped, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if scoped == nil {
+		return uuid.Nil, apperror.Invalid("parameter branch_id wajib diisi untuk akun owner")
+	}
+	return *scoped, nil
 }
 
 // ---------------------------------------------------------------------
-// Upload Handlers (Auto-Compression)
+// Uploads
 // ---------------------------------------------------------------------
+
 func (c *Controller) UploadImage(w http.ResponseWriter, r *http.Request) {
-	// Parse 10MB max form
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeError(w, apperror.ErrBadRequest)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		writeError(w, apperror.Invalid("gambar terlalu besar (maksimal 8 MB)"))
 		return
 	}
 
 	file, fileHeader, err := r.FormFile("image")
 	if err != nil {
-		writeError(w, apperror.ErrBadRequest)
+		writeError(w, apperror.Invalid("file gambar tidak ditemukan pada field 'image'"))
 		return
 	}
 	defer file.Close()
@@ -564,53 +783,78 @@ func (c *Controller) UploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"url":     url,
-	})
+	ok(w, map[string]string{"url": url})
 }
 
+const maxUploadBytes = 8 << 20
+
 // ---------------------------------------------------------------------
-// Analytics Handlers
+// Analytics
 // ---------------------------------------------------------------------
+
 func (c *Controller) BranchDashboard(w http.ResponseWriter, r *http.Request) {
-	claims, _ := middleware.GetUserFromContext(r.Context())
-	var branchID uuid.UUID
-	if claims != nil && claims.BranchID != nil {
-		branchID = *claims.BranchID
-	} else {
-		branchID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	}
-
-	stats, err := c.svc.GetBranchAnalytics(r.Context(), branchID)
+	requested, err := queryUUID(r, "branch_id")
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+	branchID, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if branchID == nil {
+		writeError(w, apperror.Invalid("parameter branch_id wajib diisi untuk akun owner"))
+		return
+	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    stats,
-	})
+	stats, err := c.svc.GetDashboardStats(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, stats)
 }
 
+// OwnerDashboard aggregates every outlet, or one outlet when branch_id is given.
 func (c *Controller) OwnerDashboard(w http.ResponseWriter, r *http.Request) {
-	stats, err := c.svc.GetOwnerAnalytics(r.Context())
+	branchID, err := queryUUID(r, "branch_id")
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    stats,
-	})
+	stats, err := c.svc.GetDashboardStats(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, stats)
 }
 
 // ---------------------------------------------------------------------
-// WebSocket Handler
+// WebSocket
 // ---------------------------------------------------------------------
+
+// HandleWebSocket authenticates the socket before upgrading. The token is
+// accepted from the query string because the browser WebSocket API cannot set
+// an Authorization header.
 func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	ws.ServeWs(c.hub, w, r)
+	var identity *ws.Identity
+
+	if token := r.URL.Query().Get("token"); token != "" {
+		claims, err := middleware.ParseToken(c.cfg, token)
+		if err != nil {
+			writeError(w, apperror.ErrUnauthorized)
+			return
+		}
+		identity = &ws.Identity{UserID: claims.UserID, Role: claims.Role, BranchID: claims.BranchID}
+	}
+
+	ws.ServeWs(c.hub, w, r, identity, []string{c.cfg.CustomerURL, c.cfg.AdminURL})
+}
+
+// Health is the liveness probe for nginx and the process manager.
+func (c *Controller) Health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

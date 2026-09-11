@@ -45,6 +45,23 @@ func (r *Repository) FindUserByPhone(ctx context.Context, phone string) (*model.
 	return &u, nil
 }
 
+// FindUserByEmail resolves a staff sign-in. Email replaces the hardcoded
+// email->phone switch that previously lived in the service layer.
+func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*model.User, error) {
+	query := `SELECT id, phone, name, role, branch_id, password_hash, address, latitude, longitude, created_at, updated_at FROM users WHERE LOWER(email) = LOWER($1)`
+	var u model.User
+	err := r.db.QueryRow(ctx, query, email).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (r *Repository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	query := `SELECT id, phone, name, role, branch_id, password_hash, address, latitude, longitude, created_at, updated_at FROM users WHERE id = $1`
 	var u model.User
@@ -83,7 +100,7 @@ func (r *Repository) ListBranches(ctx context.Context) ([]model.Branch, error) {
 	}
 	defer rows.Close()
 
-	var branches []model.Branch
+	branches := make([]model.Branch, 0)
 	for rows.Next() {
 		var b model.Branch
 		var tagsJSON []byte
@@ -152,7 +169,7 @@ func (r *Repository) ListCategories(ctx context.Context) ([]model.Category, erro
 	}
 	defer rows.Close()
 
-	var list []model.Category
+	list := make([]model.Category, 0)
 	for rows.Next() {
 		var c model.Category
 		if err := rows.Scan(&c.ID, &c.Name, &c.Slug, &c.Emoji, &c.SortOrder, &c.CreatedAt); err != nil {
@@ -179,7 +196,7 @@ func (r *Repository) ListMenuItemsByBranch(ctx context.Context, branchID uuid.UU
 	}
 	defer rows.Close()
 
-	var items []model.MenuItem
+	items := make([]model.MenuItem, 0)
 	for rows.Next() {
 		var m model.MenuItem
 		var catName, catSlug, catEmoji string
@@ -288,7 +305,7 @@ func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Or
 			promo_code, scheduled_at, version
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 1
-		) RETURNING id, created_at, updated_at
+		) RETURNING id, version, created_at, updated_at
 	`
 	err := tx.QueryRow(ctx, query,
 		order.OrderNumber, order.UserID, order.BranchID, order.OrderType, order.Status,
@@ -296,7 +313,7 @@ func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Or
 		order.DeliveryLat, order.DeliveryLon, order.DeliveryDistanceKm,
 		order.Subtotal, order.DeliveryFee, order.ServiceFee, order.Discount, order.GrandTotal,
 		order.PromoCode, order.ScheduledAt,
-	).Scan(&order.ID, &order.CreatedAt, &order.UpdatedAt)
+	).Scan(&order.ID, &order.Version, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -331,7 +348,8 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
 		       o.promo_code, o.scheduled_at, o.driver_name, o.driver_phone, o.driver_vehicle,
-		       o.driver_plate, o.driver_rating, o.rejection_reason, o.version, o.created_at, o.updated_at,
+		       o.driver_plate, o.driver_rating, o.driver_assigned_at, o.acknowledged_at,
+		       o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug, b.address, b.phone
 		FROM orders o
 		JOIN branches b ON o.branch_id = b.id
@@ -345,7 +363,8 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 		&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
 		&o.PromoCode, &o.ScheduledAt, &o.DriverName, &o.DriverPhone, &o.DriverVehicle,
-		&o.DriverPlate, &o.DriverRating, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+		&o.DriverPlate, &o.DriverRating, &o.DriverAssignedAt, &o.AcknowledgedAt,
+		&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 		&bName, &bSlug, &bAddr, &bPhone,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -399,7 +418,7 @@ func (r *Repository) ListOrderItems(ctx context.Context, orderID uuid.UUID) ([]m
 	}
 	defer rows.Close()
 
-	var list []model.OrderItem
+	list := make([]model.OrderItem, 0)
 	for rows.Next() {
 		var it model.OrderItem
 		if err := rows.Scan(
@@ -413,11 +432,34 @@ func (r *Repository) ListOrderItems(ctx context.Context, orderID uuid.UUID) ([]m
 	return list, nil
 }
 
+// ListOrdersForCustomer backs the customer's own order history, scoped to the
+// signed-in account.
+func (r *Repository) ListOrdersForCustomer(ctx context.Context, userID uuid.UUID, limit, offset int) ([]model.Order, int, error) {
+	return r.listOrders(ctx, orderFilter{UserID: &userID}, limit, offset)
+}
+
 func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status string, search string, limit, offset int) ([]model.Order, int, error) {
+	return r.listOrders(ctx, orderFilter{BranchID: branchID, Status: status, Search: search}, limit, offset)
+}
+
+type orderFilter struct {
+	BranchID *uuid.UUID
+	UserID   *uuid.UUID
+	Status   string
+	Search   string
+}
+
+func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offset int) ([]model.Order, int, error) {
+	branchID, status, search := f.BranchID, f.Status, f.Search
 	baseQuery := `FROM orders o JOIN branches b ON o.branch_id = b.id WHERE 1=1`
 	args := []any{}
 	idx := 1
 
+	if f.UserID != nil {
+		baseQuery += fmt.Sprintf(" AND o.user_id = $%d", idx)
+		args = append(args, *f.UserID)
+		idx++
+	}
 	if branchID != nil {
 		baseQuery += fmt.Sprintf(" AND o.branch_id = $%d", idx)
 		args = append(args, *branchID)
@@ -443,9 +485,11 @@ func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status
 	selectQuery := `
 		SELECT o.id, o.order_number, o.user_id, o.branch_id, o.order_type, o.status,
 		       o.customer_name, o.customer_phone, o.delivery_address, o.delivery_notes,
+		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
 		       o.promo_code, o.scheduled_at, o.driver_name, o.driver_phone, o.driver_vehicle,
-		       o.driver_plate, o.driver_rating, o.rejection_reason, o.version, o.created_at, o.updated_at,
+		       o.driver_plate, o.driver_rating, o.driver_assigned_at, o.acknowledged_at,
+		       o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug
 		` + baseQuery + fmt.Sprintf(" ORDER BY o.created_at DESC LIMIT $%d OFFSET $%d", idx, idx+1)
 
@@ -456,16 +500,18 @@ func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status
 	}
 	defer rows.Close()
 
-	var orders []model.Order
+	orders := make([]model.Order, 0)
 	for rows.Next() {
 		var o model.Order
 		var bName, bSlug string
 		if err := rows.Scan(
 			&o.ID, &o.OrderNumber, &o.UserID, &o.BranchID, &o.OrderType, &o.Status,
 			&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
+			&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 			&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
 			&o.PromoCode, &o.ScheduledAt, &o.DriverName, &o.DriverPhone, &o.DriverVehicle,
-			&o.DriverPlate, &o.DriverRating, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+			&o.DriverPlate, &o.DriverRating, &o.DriverAssignedAt, &o.AcknowledgedAt,
+			&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 			&bName, &bSlug,
 		); err != nil {
 			return nil, 0, err
@@ -478,15 +524,53 @@ func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status
 		orders = append(orders, o)
 	}
 
-	// Attach items to each order
-	for i := range orders {
-		items, err := r.ListOrderItems(ctx, orders[i].ID)
-		if err == nil {
-			orders[i].Items = items
-		}
+	// Attach items in one round trip rather than a query per order.
+	if err := r.attachOrderItems(ctx, orders); err != nil {
+		return nil, 0, err
 	}
 
 	return orders, total, nil
+}
+
+// attachOrderItems loads the line items for a page of orders with a single
+// query and fills them in place.
+func (r *Repository) attachOrderItems(ctx context.Context, orders []model.Order) error {
+	if len(orders) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, len(orders))
+	index := make(map[uuid.UUID]int, len(orders))
+	for i := range orders {
+		ids[i] = orders[i].ID
+		index[orders[i].ID] = i
+	}
+
+	query := `
+		SELECT id, order_id, menu_item_id, item_name, item_price, item_icon, quantity, notes, line_total, created_at
+		FROM order_items
+		WHERE order_id = ANY($1)
+		ORDER BY created_at ASC, id ASC
+	`
+	rows, err := r.db.Query(ctx, query, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var it model.OrderItem
+		if err := rows.Scan(
+			&it.ID, &it.OrderID, &it.MenuItemID, &it.ItemName, &it.ItemPrice, &it.ItemIcon,
+			&it.Quantity, &it.Notes, &it.LineTotal, &it.CreatedAt,
+		); err != nil {
+			return err
+		}
+		if i, ok := index[it.OrderID]; ok {
+			orders[i].Items = append(orders[i].Items, it)
+		}
+	}
+	return rows.Err()
 }
 
 func (r *Repository) UpdateOrderStatus(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, newStatus string, rejectionReason string, expectedVersion int) error {
@@ -585,9 +669,16 @@ func (r *Repository) UpdatePaymentStatus(ctx context.Context, tx pgx.Tx, midtran
 // Promo Repository
 // ---------------------------------------------------------------------
 func (r *Repository) FindPromoByCode(ctx context.Context, code string) (*model.Promo, error) {
-	query := `SELECT id, code, type, discount_amount, is_active, min_spend, created_at FROM promos WHERE UPPER(code) = UPPER($1) AND is_active = true`
+	query := `
+		SELECT id, code, type, discount_amount, is_active, min_spend,
+		       valid_from, valid_until, max_redemptions, redemption_count, created_at
+		FROM promos WHERE UPPER(code) = UPPER($1)
+	`
 	var p model.Promo
-	err := r.db.QueryRow(ctx, query, code).Scan(&p.ID, &p.Code, &p.Type, &p.DiscountAmount, &p.IsActive, &p.MinSpend, &p.CreatedAt)
+	err := r.db.QueryRow(ctx, query, code).Scan(
+		&p.ID, &p.Code, &p.Type, &p.DiscountAmount, &p.IsActive, &p.MinSpend,
+		&p.ValidFrom, &p.ValidUntil, &p.MaxRedemptions, &p.RedemptionCount, &p.CreatedAt,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -630,67 +721,159 @@ func (r *Repository) UpdateSettings(ctx context.Context, s *model.BranchSettings
 		UPDATE branch_settings
 		SET operating_hours = $1, max_delivery_radius_km = $2, base_delivery_fee_near = $3,
 		    base_delivery_fee_mid = $4, base_delivery_fee_far = $5, near_threshold_km = $6,
-		    mid_threshold_km = $7, min_order_amount = $8, free_delivery_threshold = $9,
-		    whatsapp_number = $10, description = $11, updated_at = NOW()
-		WHERE branch_id = $12
+		    mid_threshold_km = $7, service_fee = $8, min_order_amount = $9, free_delivery_threshold = $10,
+		    whatsapp_number = $11, description = $12, updated_at = NOW()
+		WHERE branch_id = $13
 	`
-	_, err := r.db.Exec(ctx, query,
+	res, err := r.db.Exec(ctx, query,
 		hoursBytes, s.MaxDeliveryRadiusKm, s.BaseDeliveryFeeNear, s.BaseDeliveryFeeMid, s.BaseDeliveryFeeFar,
-		s.NearThresholdKm, s.MidThresholdKm, s.MinOrderAmount, s.FreeDeliveryThreshold, s.WhatsappNumber, s.Description,
-		s.BranchID,
+		s.NearThresholdKm, s.MidThresholdKm, s.ServiceFee, s.MinOrderAmount, s.FreeDeliveryThreshold,
+		s.WhatsappNumber, s.Description, s.BranchID,
 	)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------
+// Order lifecycle extras: driver assignment & staff acknowledgement
+// ---------------------------------------------------------------------
+
+// AssignDriver records the courier handling an order. Driver details used to
+// come from column defaults ("Andi Pratama", "B 1234 ABC"), which meant every
+// customer saw the same invented courier.
+func (r *Repository) AssignDriver(ctx context.Context, orderID uuid.UUID, name, phone, vehicle, plate string) error {
+	query := `
+		UPDATE orders
+		SET driver_name = $1, driver_phone = $2, driver_vehicle = $3, driver_plate = $4,
+		    driver_assigned_at = NOW(), updated_at = NOW()
+		WHERE id = $5
+	`
+	res, err := r.db.Exec(ctx, query, name, phone, vehicle, plate, orderID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
+// AcknowledgeOrders marks orders as seen by staff so the admin unread badge is
+// backed by the database and survives a page reload.
+func (r *Repository) AcknowledgeOrders(ctx context.Context, branchID *uuid.UUID, orderIDs []uuid.UUID, userID uuid.UUID) (int, error) {
+	query := `
+		UPDATE orders
+		SET acknowledged_at = NOW(), acknowledged_by = $1
+		WHERE acknowledged_at IS NULL
+		  AND ($2::uuid IS NULL OR branch_id = $2)
+		  AND ($3::uuid[] IS NULL OR id = ANY($3))
+	`
+	var ids any
+	if len(orderIDs) > 0 {
+		ids = orderIDs
+	}
+	res, err := r.db.Exec(ctx, query, userID, branchID, ids)
+	if err != nil {
+		return 0, err
+	}
+	return int(res.RowsAffected()), nil
+}
+
+// CountUnacknowledgedOrders powers the admin notification badge.
+func (r *Repository) CountUnacknowledgedOrders(ctx context.Context, branchID *uuid.UUID) (int, error) {
+	query := `
+		SELECT COUNT(*) FROM orders
+		WHERE acknowledged_at IS NULL
+		  AND status NOT IN ('cancelled', 'rejected', 'completed')
+		  AND ($1::uuid IS NULL OR branch_id = $1)
+	`
+	var count int
+	err := r.db.QueryRow(ctx, query, branchID).Scan(&count)
+	return count, err
+}
+
+// IncrementPromoRedemption is called once an order that used a promo is
+// committed, so max_redemptions is actually enforced.
+func (r *Repository) IncrementPromoRedemption(ctx context.Context, tx pgx.Tx, code string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE promos SET redemption_count = redemption_count + 1 WHERE UPPER(code) = UPPER($1)`, code)
 	return err
 }
 
-// ---------------------------------------------------------------------
-// Analytics Repository
-// ---------------------------------------------------------------------
-func (r *Repository) GetBranchStats(ctx context.Context, branchID uuid.UUID) (map[string]any, error) {
-	// Orders today, Revenue today, Average order, Pending count
+// FindMenuItemsByIDs loads several menu items at once for order validation,
+// replacing a query per line item.
+func (r *Repository) FindMenuItemsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]model.MenuItem, error) {
+	result := make(map[uuid.UUID]model.MenuItem, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+
 	query := `
-		SELECT
-			COALESCE(COUNT(*), 0) AS total_orders,
-			COALESCE(SUM(grand_total), 0) AS total_revenue,
-			COALESCE(AVG(grand_total), 0) AS avg_order,
-			COALESCE(COUNT(*) FILTER (WHERE status = 'pending'), 0) AS pending_orders
-		FROM orders
-		WHERE branch_id = $1 AND created_at >= CURRENT_DATE
+		SELECT id, branch_id, category_id, name, description, price, icon, icon_bg_class,
+		       image_url, tag, is_available, sort_order
+		FROM menu_items
+		WHERE id = ANY($1)
 	`
-	var totalOrders, pendingOrders int
-	var totalRevenue, avgOrder int64
-	err := r.db.QueryRow(ctx, query, branchID).Scan(&totalOrders, &totalRevenue, &avgOrder, &pendingOrders)
+	rows, err := r.db.Query(ctx, query, ids)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	return map[string]any{
-		"total_orders":   totalOrders,
-		"total_revenue":  totalRevenue,
-		"avg_order":      avgOrder,
-		"pending_orders": pendingOrders,
-	}, nil
+	for rows.Next() {
+		var m model.MenuItem
+		if err := rows.Scan(
+			&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
+			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder,
+		); err != nil {
+			return nil, err
+		}
+		result[m.ID] = m
+	}
+	return result, rows.Err()
 }
 
-func (r *Repository) GetOwnerStats(ctx context.Context) (map[string]any, error) {
+// CategoryExists guards menu writes against a bogus category_id, which would
+// otherwise surface as an opaque foreign-key error.
+func (r *Repository) CategoryExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM categories WHERE id = $1)`, id).Scan(&exists)
+	return exists, err
+}
+
+// ListSettingsByBranch returns every branch's settings keyed by branch id, so
+// listing branches costs one query instead of one per branch.
+func (r *Repository) ListSettingsByBranch(ctx context.Context) (map[uuid.UUID]model.BranchSettings, error) {
 	query := `
-		SELECT
-			COALESCE(COUNT(*), 0) AS total_orders,
-			COALESCE(SUM(grand_total), 0) AS total_revenue,
-			COALESCE(COUNT(*) FILTER (WHERE status = 'pending'), 0) AS pending_orders
-		FROM orders
-		WHERE created_at >= CURRENT_DATE
+		SELECT id, branch_id, operating_hours, max_delivery_radius_km, base_delivery_fee_near,
+		       base_delivery_fee_mid, base_delivery_fee_far, near_threshold_km, mid_threshold_km,
+		       service_fee, min_order_amount, free_delivery_threshold, whatsapp_number, description, updated_at
+		FROM branch_settings
 	`
-	var totalOrders, pendingOrders int
-	var totalRevenue int64
-	err := r.db.QueryRow(ctx, query).Scan(&totalOrders, &totalRevenue, &pendingOrders)
+	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	return map[string]any{
-		"total_orders":   totalOrders,
-		"total_revenue":  totalRevenue,
-		"pending_orders": pendingOrders,
-		"network_rating": 4.8,
-	}, nil
+	out := make(map[uuid.UUID]model.BranchSettings)
+	for rows.Next() {
+		var s model.BranchSettings
+		var hoursJSON []byte
+		if err := rows.Scan(
+			&s.ID, &s.BranchID, &hoursJSON, &s.MaxDeliveryRadiusKm, &s.BaseDeliveryFeeNear,
+			&s.BaseDeliveryFeeMid, &s.BaseDeliveryFeeFar, &s.NearThresholdKm, &s.MidThresholdKm,
+			&s.ServiceFee, &s.MinOrderAmount, &s.FreeDeliveryThreshold, &s.WhatsappNumber, &s.Description, &s.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(hoursJSON, &s.OperatingHours)
+		out[s.BranchID] = s
+	}
+	return out, rows.Err()
 }

@@ -79,6 +79,86 @@ type CreateOrderRequest struct {
 	Items           []CreateOrderItemRequest `json:"items" validate:"required,min=1"`
 }
 
+// Validate enforces the shape of a checkout submission. Quantities are capped
+// so a single request cannot be used to mint an enormous order.
+func (r *CreateOrderRequest) Validate() error {
+	r.CustomerName = strings.TrimSpace(r.CustomerName)
+	r.DeliveryAddress = strings.TrimSpace(r.DeliveryAddress)
+	r.DeliveryNotes = strings.TrimSpace(r.DeliveryNotes)
+	r.PromoCode = strings.ToUpper(strings.TrimSpace(r.PromoCode))
+
+	if r.BranchID == uuid.Nil {
+		return apperror.Invalid("outlet wajib dipilih")
+	}
+	switch r.OrderType {
+	case "delivery", "pickup", "scheduled":
+	default:
+		return apperror.Invalid("metode penerimaan tidak valid")
+	}
+	if len(r.CustomerName) < 2 || len(r.CustomerName) > 100 {
+		return apperror.Invalid("nama pemesan harus 2-100 karakter")
+	}
+	if len(r.DeliveryAddress) > 500 {
+		return apperror.Invalid("alamat maksimal 500 karakter")
+	}
+	if len(r.DeliveryNotes) > 300 {
+		return apperror.Invalid("catatan maksimal 300 karakter")
+	}
+	if len(r.PromoCode) > 50 {
+		return apperror.Invalid("kode promo tidak valid")
+	}
+	if len(r.Items) == 0 {
+		return apperror.Invalid("keranjang pesanan kosong")
+	}
+	if len(r.Items) > 100 {
+		return apperror.Invalid("terlalu banyak jenis item dalam satu pesanan")
+	}
+
+	totalQty := 0
+	for i := range r.Items {
+		it := &r.Items[i]
+		it.Notes = strings.TrimSpace(it.Notes)
+		if it.MenuItemID == uuid.Nil {
+			return apperror.Invalid("item pesanan tidak valid")
+		}
+		if it.Quantity < 1 || it.Quantity > 99 {
+			return apperror.Invalid("jumlah setiap item harus antara 1 dan 99")
+		}
+		if len(it.Notes) > 200 {
+			return apperror.Invalid("catatan item maksimal 200 karakter")
+		}
+		totalQty += it.Quantity
+	}
+	if totalQty > 300 {
+		return apperror.Invalid("total item dalam satu pesanan terlalu banyak")
+	}
+
+	if r.OrderType == "scheduled" {
+		if r.ScheduledAt == nil {
+			return apperror.Invalid("waktu penjadwalan wajib diisi")
+		}
+		if r.ScheduledAt.Before(time.Now().Add(-5 * time.Minute)) {
+			return apperror.Invalid("waktu penjadwalan tidak boleh di masa lalu")
+		}
+		if r.ScheduledAt.After(time.Now().Add(7 * 24 * time.Hour)) {
+			return apperror.Invalid("penjadwalan maksimal 7 hari ke depan")
+		}
+	} else {
+		// A time picked before the customer switched away from "scheduled"
+		// must not linger on the order.
+		r.ScheduledAt = nil
+	}
+
+	if r.DeliveryLat != nil && (*r.DeliveryLat < -90 || *r.DeliveryLat > 90) {
+		return apperror.Invalid("koordinat lokasi tidak valid")
+	}
+	if r.DeliveryLon != nil && (*r.DeliveryLon < -180 || *r.DeliveryLon > 180) {
+		return apperror.Invalid("koordinat lokasi tidak valid")
+	}
+
+	return nil
+}
+
 type UpdateOrderStatusRequest struct {
 	Status          string `json:"status" validate:"required"`
 	RejectionReason string `json:"rejection_reason"`
@@ -106,15 +186,45 @@ type ValidatePromoResponse struct {
 }
 
 type CreateMenuItemRequest struct {
-	BranchID    uuid.UUID `json:"branch_id" validate:"required"`
+	BranchID    uuid.UUID `json:"branch_id"`
 	CategoryID  uuid.UUID `json:"category_id" validate:"required"`
 	Name        string    `json:"name" validate:"required"`
 	Description string    `json:"description"`
 	Price       int       `json:"price" validate:"required,min=1000"`
 	Icon        string    `json:"icon"`
 	IconBgClass string    `json:"icon_bg_class"`
+	ImageURL    string    `json:"image_url"`
 	Tag         string    `json:"tag"`
 	IsAvailable bool      `json:"is_available"`
+	SortOrder   int       `json:"sort_order"`
+}
+
+// Validate enforces the rules the admin form relies on. Every field is
+// re-checked here because the client is untrusted.
+func (r *CreateMenuItemRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	r.Description = strings.TrimSpace(r.Description)
+	r.Tag = strings.TrimSpace(r.Tag)
+
+	if r.CategoryID == uuid.Nil {
+		return apperror.Invalid("kategori wajib dipilih")
+	}
+	if len(r.Name) < 2 || len(r.Name) > 100 {
+		return apperror.Invalid("nama menu harus 2-100 karakter")
+	}
+	if len(r.Description) > 500 {
+		return apperror.Invalid("deskripsi maksimal 500 karakter")
+	}
+	if r.Price < 1000 || r.Price > 10000000 {
+		return apperror.Invalid("harga harus antara Rp 1.000 dan Rp 10.000.000")
+	}
+	if len(r.Tag) > 50 {
+		return apperror.Invalid("label maksimal 50 karakter")
+	}
+	if r.SortOrder < 0 || r.SortOrder > 9999 {
+		return apperror.Invalid("urutan harus antara 0 dan 9999")
+	}
+	return nil
 }
 
 type UpdateMenuItemRequest struct {
@@ -124,8 +234,43 @@ type UpdateMenuItemRequest struct {
 	Price       *int       `json:"price"`
 	Icon        *string    `json:"icon"`
 	IconBgClass *string    `json:"icon_bg_class"`
+	ImageURL    *string    `json:"image_url"`
 	Tag         *string    `json:"tag"`
 	IsAvailable *bool      `json:"is_available"`
+	SortOrder   *int       `json:"sort_order"`
+}
+
+// Validate checks only the fields actually supplied, so a partial update
+// stays partial.
+func (r *UpdateMenuItemRequest) Validate() error {
+	if r.CategoryID != nil && *r.CategoryID == uuid.Nil {
+		return apperror.Invalid("kategori tidak valid")
+	}
+	if r.Name != nil {
+		*r.Name = strings.TrimSpace(*r.Name)
+		if len(*r.Name) < 2 || len(*r.Name) > 100 {
+			return apperror.Invalid("nama menu harus 2-100 karakter")
+		}
+	}
+	if r.Description != nil {
+		*r.Description = strings.TrimSpace(*r.Description)
+		if len(*r.Description) > 500 {
+			return apperror.Invalid("deskripsi maksimal 500 karakter")
+		}
+	}
+	if r.Price != nil && (*r.Price < 1000 || *r.Price > 10000000) {
+		return apperror.Invalid("harga harus antara Rp 1.000 dan Rp 10.000.000")
+	}
+	if r.Tag != nil {
+		*r.Tag = strings.TrimSpace(*r.Tag)
+		if len(*r.Tag) > 50 {
+			return apperror.Invalid("label maksimal 50 karakter")
+		}
+	}
+	if r.SortOrder != nil && (*r.SortOrder < 0 || *r.SortOrder > 9999) {
+		return apperror.Invalid("urutan harus antara 0 dan 9999")
+	}
+	return nil
 }
 
 type ToggleAvailabilityRequest struct {
@@ -133,21 +278,186 @@ type ToggleAvailabilityRequest struct {
 }
 
 type UpdateBranchSettingsRequest struct {
-	OperatingHours         map[string]any `json:"operating_hours"`
-	MaxDeliveryRadiusKm    int            `json:"max_delivery_radius_km"`
-	BaseDeliveryFeeNear    int            `json:"base_delivery_fee_near"`
-	BaseDeliveryFeeMid     int            `json:"base_delivery_fee_mid"`
-	BaseDeliveryFeeFar     int            `json:"base_delivery_fee_far"`
-	NearThresholdKm        int            `json:"near_threshold_km"`
-	MidThresholdKm         int            `json:"mid_threshold_km"`
-	MinOrderAmount         int            `json:"min_order_amount"`
-	FreeDeliveryThreshold  int            `json:"free_delivery_threshold"`
-	WhatsappNumber         string         `json:"whatsapp_number"`
-	Description            string         `json:"description"`
+	BranchID              *uuid.UUID     `json:"branch_id"`
+	OperatingHours        map[string]any `json:"operating_hours"`
+	MaxDeliveryRadiusKm   int            `json:"max_delivery_radius_km"`
+	BaseDeliveryFeeNear   int            `json:"base_delivery_fee_near"`
+	BaseDeliveryFeeMid    int            `json:"base_delivery_fee_mid"`
+	BaseDeliveryFeeFar    int            `json:"base_delivery_fee_far"`
+	NearThresholdKm       int            `json:"near_threshold_km"`
+	MidThresholdKm        int            `json:"mid_threshold_km"`
+	ServiceFee            int            `json:"service_fee"`
+	MinOrderAmount        int            `json:"min_order_amount"`
+	FreeDeliveryThreshold int            `json:"free_delivery_threshold"`
+	WhatsappNumber        string         `json:"whatsapp_number"`
+	Description           string         `json:"description"`
 }
+
+// Validate rejects settings that would make the storefront unusable, e.g. a
+// mid tier cheaper than the near tier or a zero delivery radius.
+func (r *UpdateBranchSettingsRequest) Validate() error {
+	if r.NearThresholdKm < 1 || r.MidThresholdKm <= r.NearThresholdKm {
+		return apperror.Invalid("batas jarak menengah harus lebih besar dari batas dekat")
+	}
+	if r.MaxDeliveryRadiusKm < r.MidThresholdKm {
+		return apperror.Invalid("radius maksimal tidak boleh lebih kecil dari batas jarak menengah")
+	}
+	if r.MaxDeliveryRadiusKm > 50 {
+		return apperror.Invalid("radius maksimal tidak boleh lebih dari 50 km")
+	}
+	for _, fee := range []int{r.BaseDeliveryFeeNear, r.BaseDeliveryFeeMid, r.BaseDeliveryFeeFar, r.ServiceFee} {
+		if fee < 0 || fee > 1000000 {
+			return apperror.Invalid("tarif harus antara Rp 0 dan Rp 1.000.000")
+		}
+	}
+	if r.BaseDeliveryFeeMid < r.BaseDeliveryFeeNear || r.BaseDeliveryFeeFar < r.BaseDeliveryFeeMid {
+		return apperror.Invalid("tarif ongkir harus naik sesuai jarak")
+	}
+	if r.MinOrderAmount < 0 || r.MinOrderAmount > 10000000 {
+		return apperror.Invalid("minimal order tidak valid")
+	}
+	if r.FreeDeliveryThreshold < 0 || r.FreeDeliveryThreshold > 100000000 {
+		return apperror.Invalid("ambang gratis ongkir tidak valid")
+	}
+	if strings.TrimSpace(r.WhatsappNumber) != "" {
+		normalized, err := NormalizeIndonesianPhone(r.WhatsappNumber)
+		if err != nil {
+			return apperror.Invalid("nomor WhatsApp outlet tidak valid")
+		}
+		r.WhatsappNumber = normalized
+	}
+	if len(r.Description) > 500 {
+		return apperror.Invalid("deskripsi maksimal 500 karakter")
+	}
+	for _, key := range []string{"weekday", "weekend"} {
+		entry, ok := r.OperatingHours[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"open", "close"} {
+			v, _ := entry[field].(string)
+			if !clockPattern.MatchString(v) {
+				return apperror.Invalid("jam operasional harus berformat HH:MM")
+			}
+		}
+	}
+	return nil
+}
+
+var clockPattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
 type CommonResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
 	Data    any    `json:"data,omitempty"`
+}
+
+// ---------------------------------------------------------------------
+// Delivery quoting
+// ---------------------------------------------------------------------
+
+type DeliveryQuoteRequest struct {
+	Lat       float64 `json:"lat"`
+	Lon       float64 `json:"lon"`
+	Subtotal  int     `json:"subtotal"`
+	OrderType string  `json:"order_type"`
+}
+
+type BranchDeliveryQuote struct {
+	BranchID         uuid.UUID `json:"branch_id"`
+	BranchSlug       string    `json:"branch_slug"`
+	BranchName       string    `json:"branch_name"`
+	DistanceKm       float64   `json:"distance_km"`
+	DistanceMeters   int       `json:"distance_meters"`
+	DeliveryFee      int       `json:"delivery_fee"`
+	ServiceFee       int       `json:"service_fee"`
+	MinOrderAmount   int       `json:"min_order_amount"`
+	EtaMinutes       int       `json:"eta_minutes"`
+	MaxRadiusKm      int       `json:"max_radius_km"`
+	WithinRadius     bool      `json:"within_radius"`
+	FreeDeliveryFrom int       `json:"free_delivery_from"`
+	IsOpenNow        bool      `json:"is_open_now"`
+	IsNearest        bool      `json:"is_nearest"`
+}
+
+type DeliveryQuoteResponse struct {
+	Quotes          []BranchDeliveryQuote `json:"quotes"`
+	NearestBranchID *uuid.UUID            `json:"nearest_branch_id,omitempty"`
+}
+
+// ---------------------------------------------------------------------
+// Geocoding
+// ---------------------------------------------------------------------
+
+type GeocodeResult struct {
+	Label       string  `json:"label"`
+	FullAddress string  `json:"full_address"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Postcode    string  `json:"postcode,omitempty"`
+}
+
+// ---------------------------------------------------------------------
+// Driver assignment
+// ---------------------------------------------------------------------
+
+type AssignDriverRequest struct {
+	DriverName    string `json:"driver_name"`
+	DriverPhone   string `json:"driver_phone"`
+	DriverVehicle string `json:"driver_vehicle"`
+	DriverPlate   string `json:"driver_plate"`
+}
+
+func (r *AssignDriverRequest) Validate() error {
+	r.DriverName = strings.TrimSpace(r.DriverName)
+	r.DriverVehicle = strings.TrimSpace(r.DriverVehicle)
+	r.DriverPlate = strings.ToUpper(strings.TrimSpace(r.DriverPlate))
+
+	if len(r.DriverName) < 2 || len(r.DriverName) > 100 {
+		return apperror.Invalid("nama kurir harus 2-100 karakter")
+	}
+	normalized, err := NormalizeIndonesianPhone(r.DriverPhone)
+	if err != nil {
+		return apperror.Invalid("nomor telepon kurir tidak valid")
+	}
+	r.DriverPhone = normalized
+
+	if len(r.DriverVehicle) > 100 {
+		return apperror.Invalid("kendaraan maksimal 100 karakter")
+	}
+	if len(r.DriverPlate) > 30 {
+		return apperror.Invalid("nomor polisi maksimal 30 karakter")
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------
+
+type HourlySalesPoint struct {
+	Hour    string `json:"hour"`
+	Orders  int    `json:"orders"`
+	Revenue int    `json:"revenue"`
+}
+
+type BranchSalesPoint struct {
+	BranchID   uuid.UUID `json:"branch_id"`
+	BranchName string    `json:"branch_name"`
+	Orders     int       `json:"orders"`
+	Revenue    int       `json:"revenue"`
+}
+
+type DashboardStats struct {
+	TotalOrders      int                `json:"total_orders"`
+	TotalRevenue     int                `json:"total_revenue"`
+	AvgOrder         int                `json:"avg_order"`
+	PendingOrders    int                `json:"pending_orders"`
+	CompletedOrders  int                `json:"completed_orders"`
+	CancelledOrders  int                `json:"cancelled_orders"`
+	OrdersDeltaPct   *float64           `json:"orders_delta_pct"`
+	RevenueDeltaPct  *float64           `json:"revenue_delta_pct"`
+	Hourly           []HourlySalesPoint `json:"hourly"`
+	Branches         []BranchSalesPoint `json:"branches,omitempty"`
+	UnacknowledgedID []uuid.UUID        `json:"-"`
 }

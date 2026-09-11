@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,10 +23,13 @@ import (
 
 func main() {
 	// Structured logging
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-	slog.SetDefault(logger)
+	// Debug logging prints request bodies and internal state; keep it out of
+	// production, where the logs would accumulate customer phone numbers.
+	logLevel := slog.LevelDebug
+	if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
+		logLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	slog.Info("Starting Maremereso Olga Backend Server...")
 
@@ -52,16 +56,18 @@ func main() {
 	// Repository -> Service -> Controller -> Router
 	repo := repository.NewRepository(dbPool)
 	svc := service.NewService(repo, cfg, hub)
-	ctrl := controller.NewController(svc, hub)
+	ctrl := controller.NewController(svc, hub, cfg)
 	r := router.NewRouter(cfg, ctrl)
 
 	// 5. HTTP Server setup with graceful shutdown
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%s", cfg.Port),
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf(":%s", cfg.Port),
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		// WriteTimeout must stay unset: it also caps WebSocket connections,
+		// and a 15s cap was silently killing every live order feed.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	// Channel to listen for errors coming from the listener.
