@@ -57,12 +57,12 @@ func TestRoadDistanceAppliesFloorAndRounding(t *testing.T) {
 
 func settings() *model.BranchSettings {
 	return &model.BranchSettings{
-		BaseDeliveryFeeNear:   8000,
-		BaseDeliveryFeeMid:    12000,
-		BaseDeliveryFeeFar:    18000,
-		NearThresholdKm:       3,
-		MidThresholdKm:        7,
-		FreeDeliveryThreshold: 150000,
+		BaseDeliveryFeeNear:   0,
+		BaseDeliveryFeeMid:    8000,
+		BaseDeliveryFeeFar:    12000,
+		NearThresholdKm:       1,
+		MidThresholdKm:        5,
+		FreeDeliveryThreshold: 0,
 		ServiceFee:            2000,
 	}
 }
@@ -77,16 +77,14 @@ func TestDeliveryFeeTiers(t *testing.T) {
 		orderType string
 		want      int
 	}{
-		{"just inside near tier", 2.9, 50000, "delivery", 8000},
-		{"exactly on near boundary", 3.0, 50000, "delivery", 8000},
-		{"just past near boundary", 3.1, 50000, "delivery", 12000},
-		{"exactly on mid boundary", 7.0, 50000, "delivery", 12000},
-		{"past mid boundary", 7.1, 50000, "delivery", 18000},
+		{"free at one kilometre", 1.0, 50000, "delivery", 0},
+		{"just past free tier", 1.1, 50000, "delivery", 8000},
+		{"exactly on five kilometre boundary", 5.0, 50000, "delivery", 8000},
+		{"past five kilometre boundary", 5.1, 50000, "delivery", 12000},
+		{"up to ten kilometres", 10.0, 50000, "delivery", 12000},
 		{"pickup is never charged", 9.0, 50000, "pickup", 0},
-		{"scheduled is charged like delivery", 5.0, 50000, "scheduled", 12000},
-		{"free delivery at the threshold", 9.0, 150000, "delivery", 0},
-		{"free delivery above the threshold", 9.0, 200000, "delivery", 0},
-		{"one rupiah below the threshold still pays", 9.0, 149999, "delivery", 18000},
+		{"scheduled is charged like delivery", 5.1, 50000, "scheduled", 12000},
+		{"subtotal does not change fixed fee", 9.0, 200000, "delivery", 12000},
 	}
 
 	for _, tc := range cases {
@@ -99,12 +97,12 @@ func TestDeliveryFeeTiers(t *testing.T) {
 	}
 }
 
-func TestDeliveryFeeIgnoresFreeThresholdWhenDisabled(t *testing.T) {
+func TestDeliveryFeeIsNotChangedBySubtotal(t *testing.T) {
 	s := settings()
 	s.FreeDeliveryThreshold = 0
 
 	if got := DeliveryFee(s, 2.0, 10_000_000, "delivery"); got != 8000 {
-		t.Errorf("with the threshold disabled a large order should still pay, got %d", got)
+		t.Errorf("a large order should keep the fixed distance fee, got %d", got)
 	}
 }
 

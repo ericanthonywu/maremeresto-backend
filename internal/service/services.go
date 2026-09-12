@@ -132,6 +132,10 @@ func (s *Service) CanAccessOrder(claims *middleware.JWTClaims, order *model.Orde
 // Auth Service
 // ---------------------------------------------------------------------
 func (s *Service) CustomerLogin(ctx context.Context, rawPhone, name string) (*dto.AuthResponse, error) {
+	name = strings.TrimSpace(name)
+	if len(name) < 2 || len(name) > 100 {
+		return nil, apperror.Invalid("nama pemesan harus 2-100 karakter")
+	}
 	// Strict phone validation and canonicalization to +628...
 	normalizedPhone, err := dto.NormalizeIndonesianPhone(rawPhone)
 	if err != nil {
@@ -144,11 +148,7 @@ func (s *Service) CustomerLogin(ctx context.Context, rawPhone, name string) (*dt
 	}
 
 	if user == nil {
-		customerName := strings.TrimSpace(name)
-		if customerName == "" {
-			customerName = "Pelanggan " + normalizedPhone[len(normalizedPhone)-4:]
-		}
-		user, err = s.repo.CreateCustomer(ctx, normalizedPhone, customerName)
+		user, err = s.repo.CreateCustomer(ctx, normalizedPhone, name)
 		if err != nil {
 			return nil, err
 		}
@@ -158,6 +158,17 @@ func (s *Service) CustomerLogin(ctx context.Context, rawPhone, name string) (*dt
 	// portal; the passwordless phone flow is for customers only.
 	if user.Role != "customer" {
 		return nil, apperror.ErrUnauthorized
+	}
+	// Checkout submits the current required name. Keep an existing account in
+	// sync without making the customer visit a separate profile screen first.
+	if user.Name != name {
+		updated, updateErr := s.repo.UpdateCustomerProfile(ctx, user.ID, name, normalizedPhone)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		if updated != nil {
+			user = updated
+		}
 	}
 
 	tokenStr, err := s.issueToken(user, 30*24*time.Hour)
@@ -175,6 +186,26 @@ func (s *Service) CustomerLogin(ctx context.Context, rawPhone, name string) (*dt
 			BranchID: user.BranchID,
 		},
 	}, nil
+}
+
+func (s *Service) UpdateCustomerProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateCustomerProfileRequest) (*dto.AuthResponse, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	user, err := s.repo.UpdateCustomerProfile(ctx, userID, req.Name, req.Phone)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, apperror.ErrNotFound
+	}
+	token, err := s.issueToken(user, 30*24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.AuthResponse{Token: token, User: dto.UserSummary{
+		ID: user.ID, Name: user.Name, Phone: user.Phone, Role: user.Role, BranchID: user.BranchID,
+	}}, nil
 }
 
 func (s *Service) AdminLogin(ctx context.Context, identifier, password string) (*dto.AuthResponse, error) {
@@ -446,6 +477,23 @@ func (s *Service) CreateMenuItem(ctx context.Context, actor *middleware.JWTClaim
 	return s.repo.FindMenuItemByID(ctx, item.ID)
 }
 
+// CreateMenuItemsBulk validates every request row before creating the menu
+// items. The editor uses this for its spreadsheet-style bulk entry action.
+func (s *Service) CreateMenuItemsBulk(ctx context.Context, actor *middleware.JWTClaims, req *dto.CreateMenuItemsBulkRequest) ([]model.MenuItem, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	items := make([]model.MenuItem, 0, len(req.Items))
+	for i := range req.Items {
+		item, err := s.CreateMenuItem(ctx, actor, &req.Items[i])
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *item)
+	}
+	return items, nil
+}
+
 func (s *Service) UpdateMenuItem(ctx context.Context, actor *middleware.JWTClaims, id uuid.UUID, req *dto.UpdateMenuItemRequest) (*model.MenuItem, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -596,16 +644,12 @@ func defaultIfEmpty(v, fallback string) string {
 // ---------------------------------------------------------------------
 // Order Service (Concurrency & State Machine)
 // ---------------------------------------------------------------------
-// validTransitions is the order state machine. Terminal states
-// (completed, cancelled, rejected) intentionally have no outgoing edges.
+// validTransitions is intentionally compact after payment: an outlet either
+// marks the paid order delivered, rejects it, or refunds it through the
+// dedicated refund flow. Historical statuses are normalised by migration 8.
 var validTransitions = map[string][]string{
-	"pending":    {"accepted", "rejected", "cancelled"},
-	"accepted":   {"preparing", "rejected", "cancelled"},
-	"preparing":  {"ready", "cancelled"},
-	"ready":      {"on_the_way", "picked_up"},
-	"on_the_way": {"delivered"},
-	"delivered":  {"completed"},
-	"picked_up":  {"completed"},
+	"pending":  {"accepted", "rejected", "cancelled"},
+	"accepted": {"completed", "rejected", "cancelled"},
 }
 
 // statusesCustomerMayCancel: once a barista has started making the drinks the
@@ -695,9 +739,9 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 			return nil, apperror.Invalid("alamat pengantaran wajib diisi")
 		}
 		distanceKm = RoadDistanceKm(*req.DeliveryLat, *req.DeliveryLon, branch.Latitude, branch.Longitude)
-		if distanceKm > float64(settings.MaxDeliveryRadiusKm) || distanceKm > maxServiceableKm {
+		if distanceKm > maxServiceableKm {
 			return nil, fmt.Errorf("%w (jarak %.1f km, maksimal %d km)",
-				apperror.ErrOutOfDeliveryRange, distanceKm, settings.MaxDeliveryRadiusKm)
+				apperror.ErrOutOfDeliveryRange, distanceKm, int(maxServiceableKm))
 		}
 	}
 
@@ -738,7 +782,7 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	orderNumber, err := s.repo.NextOrderNumber(ctx, tx)
+	orderNumber, err := s.repo.NextOrderNumber(ctx, tx, branch.Slug)
 	if err != nil {
 		return nil, err
 	}
@@ -825,6 +869,10 @@ func (s *Service) ListOrders(ctx context.Context, branchID *uuid.UUID, status, s
 	return s.repo.ListOrders(ctx, branchID, status, search, limit, offset)
 }
 
+func (s *Service) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID) (map[string]int, error) {
+	return s.repo.CountOrdersByStatus(ctx, branchID)
+}
+
 // ListOrdersForCustomer returns the signed-in customer's own order history.
 func (s *Service) ListOrdersForCustomer(ctx context.Context, userID uuid.UUID, limit, offset int) ([]model.Order, int, error) {
 	return s.repo.ListOrdersForCustomer(ctx, userID, limit, offset)
@@ -845,11 +893,10 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 	if newStatus == "rejected" && strings.TrimSpace(reason) == "" {
 		return nil, apperror.Invalid("alasan penolakan wajib diisi")
 	}
-	// The customer's tracking screen shows a courier card as soon as the order
-	// is on its way; refusing the transition keeps that card from rendering an
-	// empty profile.
-	if newStatus == "on_the_way" && (order.DriverName == nil || *order.DriverName == "") {
-		return nil, apperror.Invalid("tetapkan kurir terlebih dahulu sebelum mengubah status menjadi 'Diantar'")
+	// A completed delivery must have a named courier so the tracking screen
+	// never claims a handoff without identifying who delivered it.
+	if newStatus == "completed" && order.OrderType != "pickup" && (order.DriverName == nil || *order.DriverName == "") {
+		return nil, apperror.Invalid("tetapkan kurir terlebih dahulu sebelum menyelesaikan pesanan antar")
 	}
 
 	tx, err := s.repo.DB().Begin(ctx)
@@ -876,6 +923,23 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 	return updated, nil
 }
 
+func (s *Service) SubmitOrderFeedback(ctx context.Context, orderID uuid.UUID, req *dto.OrderFeedbackRequest) (*model.OrderFeedback, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	order, err := s.repo.FindOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil {
+		return nil, apperror.ErrNotFound
+	}
+	if order.Status != "completed" {
+		return nil, apperror.Invalid("feedback dapat diberikan setelah pesanan selesai")
+	}
+	return s.repo.UpsertOrderFeedback(ctx, orderID, req.Rating, req.Comment)
+}
+
 func isValidTransition(from, to string) bool {
 	for _, allowed := range validTransitions[from] {
 		if allowed == to {
@@ -896,6 +960,9 @@ func (s *Service) broadcastStatus(order *model.Order, message string) {
 	}
 	if message != "" {
 		payload["message"] = message
+	}
+	if order.RejectionReason != nil && *order.RejectionReason != "" {
+		payload["rejection_reason"] = *order.RejectionReason
 	}
 
 	s.hub.Broadcast(ws.OrderRoom(order.ID), "status_updated", payload)
@@ -1573,15 +1640,15 @@ func (s *Service) UpdateBranchSettings(ctx context.Context, branchID uuid.UUID, 
 	settings := &model.BranchSettings{
 		BranchID:              branchID,
 		OperatingHours:        req.OperatingHours,
-		MaxDeliveryRadiusKm:   req.MaxDeliveryRadiusKm,
-		BaseDeliveryFeeNear:   req.BaseDeliveryFeeNear,
-		BaseDeliveryFeeMid:    req.BaseDeliveryFeeMid,
-		BaseDeliveryFeeFar:    req.BaseDeliveryFeeFar,
-		NearThresholdKm:       req.NearThresholdKm,
-		MidThresholdKm:        req.MidThresholdKm,
+		MaxDeliveryRadiusKm:   10,
+		BaseDeliveryFeeNear:   0,
+		BaseDeliveryFeeMid:    8000,
+		BaseDeliveryFeeFar:    12000,
+		NearThresholdKm:       1,
+		MidThresholdKm:        5,
 		ServiceFee:            req.ServiceFee,
 		MinOrderAmount:        req.MinOrderAmount,
-		FreeDeliveryThreshold: req.FreeDeliveryThreshold,
+		FreeDeliveryThreshold: 0,
 		WhatsappNumber:        req.WhatsappNumber,
 	}
 	if req.Description != "" {

@@ -107,8 +107,31 @@ func (c *Controller) CustomerPhoneLogin(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
+	if err := req.Validate(); err != nil {
+		writeError(w, err)
+		return
+	}
 
 	resp, err := c.svc.CustomerLogin(r.Context(), req.Phone, req.Name)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, resp)
+}
+
+func (c *Controller) UpdateCustomerProfile(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	if claims == nil || claims.Role != "customer" {
+		writeError(w, apperror.ErrUnauthorized)
+		return
+	}
+	var req dto.UpdateCustomerProfileRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	resp, err := c.svc.UpdateCustomerProfile(r.Context(), claims.UserID, &req)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -322,6 +345,20 @@ func (c *Controller) CreateMenuItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": item})
 }
 
+func (c *Controller) CreateMenuItemsBulk(w http.ResponseWriter, r *http.Request) {
+	var req dto.CreateMenuItemsBulkRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	items, err := c.svc.CreateMenuItemsBulk(r.Context(), actor(r), &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": items})
+}
+
 func (c *Controller) UpdateMenuItem(w http.ResponseWriter, r *http.Request) {
 	id, err := urlUUID(r, "id")
 	if err != nil {
@@ -513,13 +550,47 @@ func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	statusCounts, err := c.svc.CountOrdersByStatus(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"data":    orders,
-		"total":   total,
-		"unread":  unread,
+		"success":       true,
+		"data":          orders,
+		"total":         total,
+		"unread":        unread,
+		"status_counts": statusCounts,
 	})
+}
+
+func (c *Controller) SubmitOrderFeedback(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	order, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), order) {
+		writeError(w, apperror.ErrNotFound)
+		return
+	}
+	var req dto.OrderFeedbackRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	feedback, err := c.svc.SubmitOrderFeedback(r.Context(), id, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, feedback)
 }
 
 func paging(r *http.Request) (limit, offset int) {

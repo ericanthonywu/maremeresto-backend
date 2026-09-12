@@ -67,6 +67,7 @@ func validOrder() CreateOrderRequest {
 		OrderType:     "delivery",
 		CustomerName:  "Budi Santoso",
 		CustomerPhone: "081234567890",
+		DeliveryNotes: "Ketuk pagar tiga kali",
 		Items:         []CreateOrderItemRequest{{MenuItemID: uuid.New(), Quantity: 2}},
 	}
 }
@@ -78,17 +79,18 @@ func TestCreateOrderRequestValidate(t *testing.T) {
 	}
 
 	cases := map[string]func(*CreateOrderRequest){
-		"no branch":         func(r *CreateOrderRequest) { r.BranchID = uuid.Nil },
-		"unknown type":      func(r *CreateOrderRequest) { r.OrderType = "teleport" },
-		"empty name":        func(r *CreateOrderRequest) { r.CustomerName = " " },
-		"no items":          func(r *CreateOrderRequest) { r.Items = nil },
-		"zero quantity":     func(r *CreateOrderRequest) { r.Items[0].Quantity = 0 },
-		"negative quantity": func(r *CreateOrderRequest) { r.Items[0].Quantity = -5 },
-		"absurd quantity":   func(r *CreateOrderRequest) { r.Items[0].Quantity = 100000 },
-		"nil menu item":     func(r *CreateOrderRequest) { r.Items[0].MenuItemID = uuid.Nil },
-		"bad latitude":      func(r *CreateOrderRequest) { v := 95.0; r.DeliveryLat = &v },
-		"bad longitude":     func(r *CreateOrderRequest) { v := -200.0; r.DeliveryLon = &v },
-		"overlong address":  func(r *CreateOrderRequest) { r.DeliveryAddress = strings.Repeat("x", 501) },
+		"no branch":              func(r *CreateOrderRequest) { r.BranchID = uuid.Nil },
+		"unknown type":           func(r *CreateOrderRequest) { r.OrderType = "teleport" },
+		"empty name":             func(r *CreateOrderRequest) { r.CustomerName = " " },
+		"no items":               func(r *CreateOrderRequest) { r.Items = nil },
+		"zero quantity":          func(r *CreateOrderRequest) { r.Items[0].Quantity = 0 },
+		"negative quantity":      func(r *CreateOrderRequest) { r.Items[0].Quantity = -5 },
+		"absurd quantity":        func(r *CreateOrderRequest) { r.Items[0].Quantity = 100000 },
+		"nil menu item":          func(r *CreateOrderRequest) { r.Items[0].MenuItemID = uuid.Nil },
+		"bad latitude":           func(r *CreateOrderRequest) { v := 95.0; r.DeliveryLat = &v },
+		"bad longitude":          func(r *CreateOrderRequest) { v := -200.0; r.DeliveryLon = &v },
+		"overlong address":       func(r *CreateOrderRequest) { r.DeliveryAddress = strings.Repeat("x", 501) },
+		"delivery note required": func(r *CreateOrderRequest) { r.DeliveryNotes = " " },
 	}
 
 	for name, mutate := range cases {

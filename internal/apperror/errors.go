@@ -11,7 +11,7 @@ var (
 	ErrForbidden               = errors.New("forbidden")
 	ErrBadRequest              = errors.New("bad request")
 	ErrConflict                = errors.New("resource conflict")
-	ErrInvalidPhone            = errors.New("format nomor telepon tidak valid, gunakan 08... atau +628...")
+	ErrInvalidPhone            = errors.New("format WhatsApp tidak valid, gunakan 08... atau +628...")
 	ErrOrderAlreadyPaid        = errors.New("pesanan ini sudah dibayar")
 	ErrOrderNotPayable         = errors.New("pesanan tidak dapat dibayar pada status saat ini")
 	ErrConcurrentModification  = errors.New("data berubah di perangkat lain, silakan muat ulang dan coba lagi")

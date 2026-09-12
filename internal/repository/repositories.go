@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
@@ -83,6 +84,29 @@ func (r *Repository) CreateCustomer(ctx context.Context, phone, name string) (*m
 	err := r.db.QueryRow(ctx, query, phone, name).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.CreatedAt, &u.UpdatedAt,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// UpdateCustomerProfile keeps the account identity used for subsequent orders
+// in sync with the customer's profile menu. The unique phone constraint is
+// deliberately left to PostgreSQL, which safely rejects a number in use.
+func (r *Repository) UpdateCustomerProfile(ctx context.Context, userID uuid.UUID, name, phone string) (*model.User, error) {
+	query := `
+		UPDATE users
+		SET name = $1, phone = $2, updated_at = NOW()
+		WHERE id = $3 AND role = 'customer'
+		RETURNING id, phone, name, role, branch_id, address, latitude, longitude, created_at, updated_at
+	`
+	var u model.User
+	err := r.db.QueryRow(ctx, query, name, phone, userID).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -291,14 +315,24 @@ func (r *Repository) DeleteMenuItem(ctx context.Context, id uuid.UUID) error {
 // ---------------------------------------------------------------------
 // Order Repository
 // ---------------------------------------------------------------------
-func (r *Repository) NextOrderNumber(ctx context.Context, tx pgx.Tx) (string, error) {
+func (r *Repository) NextOrderNumber(ctx context.Context, tx pgx.Tx, branchSlug string) (string, error) {
 	var seq int
 	err := tx.QueryRow(ctx, `SELECT nextval('order_number_seq')`).Scan(&seq)
 	if err != nil {
 		return "", err
 	}
 	dateStr := time.Now().Format("20060102")
-	return fmt.Sprintf("MRM-%s-%04d", dateStr, seq), nil
+	prefix := strings.ToUpper(strings.TrimSpace(branchSlug))
+	prefix = strings.Map(func(r rune) rune {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, prefix)
+	if prefix == "" {
+		prefix = "OUTLET"
+	}
+	return fmt.Sprintf("%s-%s-%04d", prefix, dateStr, seq), nil
 }
 
 func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Order) error {
@@ -356,13 +390,14 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		       o.promo_code, o.scheduled_at, o.driver_name, o.driver_phone, o.driver_vehicle,
 		       o.driver_plate, o.driver_rating, o.driver_assigned_at, o.acknowledged_at,
 		       o.rejection_reason, o.version, o.created_at, o.updated_at,
-		       b.name, b.slug, b.address, b.phone
+		       b.name, b.slug, b.address, b.phone, COALESCE(bs.whatsapp_number, '')
 		FROM orders o
 		JOIN branches b ON o.branch_id = b.id
+		LEFT JOIN branch_settings bs ON bs.branch_id = b.id
 		WHERE o.id = $1
 	`
 	var o model.Order
-	var bName, bSlug, bAddr, bPhone string
+	var bName, bSlug, bAddr, bPhone, bWhatsApp string
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&o.ID, &o.OrderNumber, &o.UserID, &o.BranchID, &o.OrderType, &o.Status,
 		&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
@@ -371,7 +406,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		&o.PromoCode, &o.ScheduledAt, &o.DriverName, &o.DriverPhone, &o.DriverVehicle,
 		&o.DriverPlate, &o.DriverRating, &o.DriverAssignedAt, &o.AcknowledgedAt,
 		&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
-		&bName, &bSlug, &bAddr, &bPhone,
+		&bName, &bSlug, &bAddr, &bPhone, &bWhatsApp,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -380,11 +415,12 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		return nil, err
 	}
 	o.Branch = &model.Branch{
-		ID:      o.BranchID,
-		Name:    bName,
-		Slug:    bSlug,
-		Address: bAddr,
-		Phone:   bPhone,
+		ID:             o.BranchID,
+		Name:           bName,
+		Slug:           bSlug,
+		Address:        bAddr,
+		Phone:          bPhone,
+		WhatsappNumber: bWhatsApp,
 	}
 
 	// Fetch items
@@ -399,8 +435,44 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 	if err == nil && p != nil {
 		o.Payment = p
 	}
+	feedback, err := r.FindOrderFeedback(ctx, o.ID)
+	if err != nil {
+		return nil, err
+	}
+	o.Feedback = feedback
 
 	return &o, nil
+}
+
+func (r *Repository) FindOrderFeedback(ctx context.Context, orderID uuid.UUID) (*model.OrderFeedback, error) {
+	query := `SELECT rating, comment, created_at, updated_at FROM order_feedback WHERE order_id = $1`
+	var feedback model.OrderFeedback
+	err := r.db.QueryRow(ctx, query, orderID).Scan(&feedback.Rating, &feedback.Comment, &feedback.CreatedAt, &feedback.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &feedback, nil
+}
+
+func (r *Repository) UpsertOrderFeedback(ctx context.Context, orderID uuid.UUID, rating int, comment string) (*model.OrderFeedback, error) {
+	query := `
+		INSERT INTO order_feedback (order_id, rating, comment)
+		VALUES ($1, $2, NULLIF($3, ''))
+		ON CONFLICT (order_id) DO UPDATE
+		SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, updated_at = NOW()
+		RETURNING rating, comment, created_at, updated_at
+	`
+	var feedback model.OrderFeedback
+	err := r.db.QueryRow(ctx, query, orderID, rating, comment).Scan(
+		&feedback.Rating, &feedback.Comment, &feedback.CreatedAt, &feedback.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &feedback, nil
 }
 
 func (r *Repository) FindOrderByOrderNumber(ctx context.Context, num string) (*model.Order, error) {
@@ -446,6 +518,36 @@ func (r *Repository) ListOrdersForCustomer(ctx context.Context, userID uuid.UUID
 
 func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status string, search string, limit, offset int) ([]model.Order, int, error) {
 	return r.listOrders(ctx, orderFilter{BranchID: branchID, Status: status, Search: search}, limit, offset)
+}
+
+// CountOrdersByStatus supplies the badges on the admin status filters. It is
+// deliberately independent of the currently selected filter/search term so
+// staff can see where work is waiting before switching tabs.
+func (r *Repository) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID) (map[string]int, error) {
+	query := `SELECT status, COUNT(*) FROM orders`
+	args := []any{}
+	if branchID != nil {
+		query += ` WHERE branch_id = $1`
+		args = append(args, *branchID)
+	}
+	query += ` GROUP BY status`
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	return counts, rows.Err()
 }
 
 type orderFilter struct {

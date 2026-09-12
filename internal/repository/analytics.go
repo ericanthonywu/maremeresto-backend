@@ -12,7 +12,7 @@ import (
 // Revenue only counts orders that were actually fulfilled or are on their way
 // to being fulfilled. Counting cancelled and rejected orders as revenue — as
 // the previous SUM(grand_total) over every row did — overstates takings.
-const revenueStatuses = `('accepted','preparing','ready','on_the_way','picked_up','delivered','completed')`
+const revenueStatuses = `('accepted','completed')`
 
 // dayBounds returns the local-midnight boundaries for "today" and the
 // equivalent window yesterday, used for the day-over-day comparison.
@@ -43,7 +43,7 @@ func (r *Repository) GetDashboardStats(ctx context.Context, branchID *uuid.UUID,
 			COUNT(*) FILTER (WHERE created_at >= $2 AND created_at < $3),
 			COALESCE(SUM(grand_total) FILTER (WHERE created_at >= $2 AND created_at < $3 AND status IN %[1]s), 0),
 			COUNT(*) FILTER (WHERE created_at >= $2 AND created_at < $3 AND status = 'pending'),
-			COUNT(*) FILTER (WHERE created_at >= $2 AND created_at < $3 AND status IN ('delivered','completed')),
+			COUNT(*) FILTER (WHERE created_at >= $2 AND created_at < $3 AND status = 'completed'),
 			COUNT(*) FILTER (WHERE created_at >= $2 AND created_at < $3 AND status IN ('cancelled','rejected')),
 			COUNT(*) FILTER (WHERE created_at >= $4 AND created_at < $2),
 			COALESCE(SUM(grand_total) FILTER (WHERE created_at >= $4 AND created_at < $2 AND status IN %[1]s), 0)

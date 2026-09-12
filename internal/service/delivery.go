@@ -21,7 +21,7 @@ const (
 	courierKmPerHour  = 18.0
 	preparationMinute = 8
 	minBillableKm     = 0.5
-	maxServiceableKm  = 25.0
+	maxServiceableKm  = 10.0
 )
 
 // HaversineKm returns the great-circle distance between two WGS-84 coordinates
@@ -52,24 +52,23 @@ func RoadDistanceKm(lat1, lon1, lat2, lon2 float64) float64 {
 	return math.Round(d*10) / 10
 }
 
-// DeliveryFee applies the branch's own tiered pricing. This is the ONE place
-// the fee is derived: the quote endpoint and order creation both call it, so a
-// customer can never be quoted one price and charged another.
-func DeliveryFee(s *model.BranchSettings, distanceKm float64, subtotal int, orderType string) int {
+// DeliveryFee applies the fixed delivery policy used by every outlet. This is
+// the ONE place the fee is derived: quotes and order creation therefore always
+// agree. The subtotal and settings stay in the signature for compatibility
+// with callers, but delivery pricing is intentionally no longer editable per
+// branch.
+func DeliveryFee(_ *model.BranchSettings, distanceKm float64, _ int, orderType string) int {
 	if orderType == "pickup" {
-		return 0
-	}
-	if s.FreeDeliveryThreshold > 0 && subtotal >= s.FreeDeliveryThreshold {
 		return 0
 	}
 
 	switch {
-	case distanceKm <= float64(s.NearThresholdKm):
-		return s.BaseDeliveryFeeNear
-	case distanceKm <= float64(s.MidThresholdKm):
-		return s.BaseDeliveryFeeMid
+	case distanceKm <= 1:
+		return 0
+	case distanceKm <= 5:
+		return 8000
 	default:
-		return s.BaseDeliveryFeeFar
+		return 12000
 	}
 }
 
@@ -85,14 +84,14 @@ func defaultSettings(branchID uuid.UUID) *model.BranchSettings {
 	return &model.BranchSettings{
 		BranchID:              branchID,
 		ServiceFee:            2000,
-		BaseDeliveryFeeNear:   8000,
-		BaseDeliveryFeeMid:    12000,
-		BaseDeliveryFeeFar:    18000,
-		NearThresholdKm:       3,
-		MidThresholdKm:        7,
-		MaxDeliveryRadiusKm:   12,
+		BaseDeliveryFeeNear:   0,
+		BaseDeliveryFeeMid:    8000,
+		BaseDeliveryFeeFar:    12000,
+		NearThresholdKm:       1,
+		MidThresholdKm:        5,
+		MaxDeliveryRadiusKm:   10,
 		MinOrderAmount:        0,
-		FreeDeliveryThreshold: 150000,
+		FreeDeliveryThreshold: 0,
 	}
 }
 
@@ -134,7 +133,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 		distance := RoadDistanceKm(req.Lat, req.Lon, b.Latitude, b.Longitude)
 		fee := DeliveryFee(set, distance, req.Subtotal, orderType)
 
-		serviceable := distance <= float64(set.MaxDeliveryRadiusKm) && distance <= maxServiceableKm
+		serviceable := distance <= maxServiceableKm
 		openNow := b.IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 
 		q := dto.BranchDeliveryQuote{
@@ -147,9 +146,9 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			ServiceFee:       set.ServiceFee,
 			MinOrderAmount:   0, // Minimum order removed
 			EtaMinutes:       EtaMinutes(distance),
-			MaxRadiusKm:      set.MaxDeliveryRadiusKm,
+			MaxRadiusKm:      int(maxServiceableKm),
 			WithinRadius:     serviceable,
-			FreeDeliveryFrom: set.FreeDeliveryThreshold,
+			FreeDeliveryFrom: 0,
 			IsOpenNow:        openNow,
 		}
 		quotes = append(quotes, q)

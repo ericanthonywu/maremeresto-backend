@@ -38,7 +38,33 @@ func NormalizeIndonesianPhone(phone string) (string, error) {
 // Request DTOs
 type CustomerPhoneLoginRequest struct {
 	Phone string `json:"phone" validate:"required"`
+	Name  string `json:"name" validate:"required"`
+}
+
+func (r *CustomerPhoneLoginRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	if len(r.Name) < 2 || len(r.Name) > 100 {
+		return apperror.Invalid("nama pemesan harus 2-100 karakter")
+	}
+	return nil
+}
+
+type UpdateCustomerProfileRequest struct {
 	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
+func (r *UpdateCustomerProfileRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	if len(r.Name) < 2 || len(r.Name) > 100 {
+		return apperror.Invalid("nama pemesan harus 2-100 karakter")
+	}
+	normalized, err := NormalizeIndonesianPhone(r.Phone)
+	if err != nil {
+		return err
+	}
+	r.Phone = normalized
+	return nil
 }
 
 type AdminLoginRequest struct {
@@ -104,6 +130,9 @@ func (r *CreateOrderRequest) Validate() error {
 	if len(r.DeliveryNotes) > 300 {
 		return apperror.Invalid("catatan maksimal 300 karakter")
 	}
+	if (r.OrderType == "delivery" || r.OrderType == "scheduled") && r.DeliveryNotes == "" {
+		return apperror.Invalid("catatan untuk kurir wajib diisi")
+	}
 	if len(r.PromoCode) > 50 {
 		return apperror.Invalid("kode promo tidak valid")
 	}
@@ -165,6 +194,22 @@ type UpdateOrderStatusRequest struct {
 	ExpectedVersion int    `json:"expected_version"`
 }
 
+type OrderFeedbackRequest struct {
+	Rating  int    `json:"rating"`
+	Comment string `json:"comment"`
+}
+
+func (r *OrderFeedbackRequest) Validate() error {
+	if r.Rating < 1 || r.Rating > 5 {
+		return apperror.Invalid("rating harus antara 1 dan 5")
+	}
+	r.Comment = strings.TrimSpace(r.Comment)
+	if len(r.Comment) > 500 {
+		return apperror.Invalid("ulasan maksimal 500 karakter")
+	}
+	return nil
+}
+
 type CreatePaymentRequest struct {
 	OrderID        uuid.UUID `json:"order_id" validate:"required"`
 	PaymentMethod  string    `json:"payment_method"`
@@ -219,6 +264,29 @@ type CreateMenuItemRequest struct {
 	Tag         string    `json:"tag"`
 	IsAvailable bool      `json:"is_available"`
 	SortOrder   int       `json:"sort_order"`
+}
+
+type CreateMenuItemsBulkRequest struct {
+	Items []CreateMenuItemRequest `json:"items"`
+}
+
+func (r *CreateMenuItemsBulkRequest) Validate() error {
+	if len(r.Items) == 0 {
+		return apperror.Invalid("minimal satu menu wajib diisi")
+	}
+	if len(r.Items) > 100 {
+		return apperror.Invalid("maksimal 100 menu dalam sekali tambah")
+	}
+	branchID := r.Items[0].BranchID
+	for i := range r.Items {
+		if r.Items[i].BranchID != branchID {
+			return apperror.Invalid("semua menu bulk harus untuk outlet yang sama")
+		}
+		if err := r.Items[i].Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Validate enforces the rules the admin form relies on. Every field is
@@ -457,7 +525,7 @@ func (r *UpdateBranchProfileRequest) Validate() error {
 	}
 	if r.Phone != "" {
 		if len(r.Phone) > 30 {
-			return apperror.Invalid("nomor telepon outlet maksimal 30 karakter")
+			return apperror.Invalid("WhatsApp outlet maksimal 30 karakter")
 		}
 		// Normalise mobile numbers (+628...); allow landline numbers like (021), (0271) as-is
 		if normalized, err := NormalizeIndonesianPhone(r.Phone); err == nil {
@@ -545,7 +613,7 @@ func (r *AssignDriverRequest) Validate() error {
 	}
 	normalized, err := NormalizeIndonesianPhone(r.DriverPhone)
 	if err != nil {
-		return apperror.Invalid("nomor telepon kurir tidak valid")
+		return apperror.Invalid("WhatsApp kurir tidak valid")
 	}
 	r.DriverPhone = normalized
 

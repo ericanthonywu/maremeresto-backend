@@ -97,9 +97,11 @@ func registerRESTRoutes(
 	r.Group(func(customer chi.Router) {
 		customer.Use(middleware.AuthRequired(cfg))
 		customer.Get("/api/v1/auth/me", ctrl.GetCurrentUser)
+		customer.Put("/api/v1/auth/customer-profile", ctrl.UpdateCustomerProfile)
 		customer.Get("/api/v1/orders", ctrl.ListMyOrders)
 		customer.Get("/api/v1/orders/{id}", ctrl.GetOrder)
 		customer.Post("/api/v1/orders/{id}/cancel", ctrl.CancelOrder)
+		customer.Put("/api/v1/orders/{id}/feedback", ctrl.SubmitOrderFeedback)
 		customer.Get("/api/v1/orders/{id}/payment", ctrl.GetPaymentStatus)
 	})
 
@@ -128,6 +130,7 @@ func registerRESTRoutes(
 		admin.Delete("/api/v1/admin/categories/{id}", ctrl.DeleteCategory)
 
 		admin.Post("/api/v1/admin/menu", ctrl.CreateMenuItem)
+		admin.Post("/api/v1/admin/menu/bulk", ctrl.CreateMenuItemsBulk)
 		admin.Put("/api/v1/admin/menu/{id}", ctrl.UpdateMenuItem)
 		admin.Put("/api/v1/admin/menu/{id}/availability", ctrl.ToggleMenuItemAvailability)
 		admin.Delete("/api/v1/admin/menu/{id}", ctrl.DeleteMenuItem)

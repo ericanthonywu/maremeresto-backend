@@ -90,40 +90,51 @@ type MenuItem struct {
 }
 
 type Order struct {
-	ID                 uuid.UUID   `json:"id"`
-	OrderNumber        string      `json:"order_number"` // OLG-YYYYMMDD-XXXX
-	UserID             *uuid.UUID  `json:"user_id,omitempty"`
-	BranchID           uuid.UUID   `json:"branch_id"`
-	Branch             *Branch     `json:"branch,omitempty"`
-	OrderType          string      `json:"order_type"` // delivery, pickup, scheduled
-	Status             string      `json:"status"`
-	CustomerName       string      `json:"customer_name"`
-	CustomerPhone      string      `json:"customer_phone"` // +628...
-	DeliveryAddress    *string     `json:"delivery_address,omitempty"`
-	DeliveryNotes      *string     `json:"delivery_notes,omitempty"`
-	DeliveryLat        *float64    `json:"delivery_lat,omitempty"`
-	DeliveryLon        *float64    `json:"delivery_lon,omitempty"`
-	DeliveryDistanceKm float64     `json:"delivery_distance_km"`
-	Subtotal           int         `json:"subtotal"`
-	DeliveryFee        int         `json:"delivery_fee"`
-	ServiceFee         int         `json:"service_fee"`
-	Discount           int         `json:"discount"`
-	GrandTotal         int         `json:"grand_total"`
-	PromoCode          *string     `json:"promo_code,omitempty"`
-	ScheduledAt        *time.Time  `json:"scheduled_at,omitempty"`
-	DriverName         *string     `json:"driver_name,omitempty"`
-	DriverPhone        *string     `json:"driver_phone,omitempty"`
-	DriverVehicle      *string     `json:"driver_vehicle,omitempty"`
-	DriverPlate        *string     `json:"driver_plate,omitempty"`
-	DriverRating       *float64    `json:"driver_rating,omitempty"`
-	DriverAssignedAt   *time.Time  `json:"driver_assigned_at,omitempty"`
-	AcknowledgedAt     *time.Time  `json:"acknowledged_at,omitempty"`
-	RejectionReason    *string     `json:"rejection_reason,omitempty"`
-	Version            int         `json:"version"`
-	Items              []OrderItem `json:"items,omitempty"`
-	Payment            *Payment    `json:"payment,omitempty"`
-	CreatedAt          time.Time   `json:"created_at"`
-	UpdatedAt          time.Time   `json:"updated_at"`
+	ID                 uuid.UUID      `json:"id"`
+	OrderNumber        string         `json:"order_number"` // BRANCH-YYYYMMDD-XXXX
+	UserID             *uuid.UUID     `json:"user_id,omitempty"`
+	BranchID           uuid.UUID      `json:"branch_id"`
+	Branch             *Branch        `json:"branch,omitempty"`
+	OrderType          string         `json:"order_type"` // delivery, pickup, scheduled
+	Status             string         `json:"status"`
+	CustomerName       string         `json:"customer_name"`
+	CustomerPhone      string         `json:"customer_phone"` // +628...
+	DeliveryAddress    *string        `json:"delivery_address,omitempty"`
+	DeliveryNotes      *string        `json:"delivery_notes,omitempty"`
+	DeliveryLat        *float64       `json:"delivery_lat,omitempty"`
+	DeliveryLon        *float64       `json:"delivery_lon,omitempty"`
+	DeliveryDistanceKm float64        `json:"delivery_distance_km"`
+	Subtotal           int            `json:"subtotal"`
+	DeliveryFee        int            `json:"delivery_fee"`
+	ServiceFee         int            `json:"service_fee"`
+	Discount           int            `json:"discount"`
+	GrandTotal         int            `json:"grand_total"`
+	PromoCode          *string        `json:"promo_code,omitempty"`
+	ScheduledAt        *time.Time     `json:"scheduled_at,omitempty"`
+	DriverName         *string        `json:"driver_name,omitempty"`
+	DriverPhone        *string        `json:"driver_phone,omitempty"`
+	DriverVehicle      *string        `json:"driver_vehicle,omitempty"`
+	DriverPlate        *string        `json:"driver_plate,omitempty"`
+	DriverRating       *float64       `json:"driver_rating,omitempty"`
+	DriverAssignedAt   *time.Time     `json:"driver_assigned_at,omitempty"`
+	AcknowledgedAt     *time.Time     `json:"acknowledged_at,omitempty"`
+	RejectionReason    *string        `json:"rejection_reason,omitempty"`
+	Version            int            `json:"version"`
+	Items              []OrderItem    `json:"items,omitempty"`
+	Payment            *Payment       `json:"payment,omitempty"`
+	Feedback           *OrderFeedback `json:"feedback,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// OrderFeedback is submitted by the customer after a completed order. It is
+// intentionally separate from a public branch rating: staff can use it to
+// improve service without exposing an unmoderated review feed.
+type OrderFeedback struct {
+	Rating    int       `json:"rating"`
+	Comment   *string   `json:"comment,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type OrderItem struct {
