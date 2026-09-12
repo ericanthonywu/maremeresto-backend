@@ -111,12 +111,6 @@ type Order struct {
 	GrandTotal         int            `json:"grand_total"`
 	PromoCode          *string        `json:"promo_code,omitempty"`
 	ScheduledAt        *time.Time     `json:"scheduled_at,omitempty"`
-	DriverName         *string        `json:"driver_name,omitempty"`
-	DriverPhone        *string        `json:"driver_phone,omitempty"`
-	DriverVehicle      *string        `json:"driver_vehicle,omitempty"`
-	DriverPlate        *string        `json:"driver_plate,omitempty"`
-	DriverRating       *float64       `json:"driver_rating,omitempty"`
-	DriverAssignedAt   *time.Time     `json:"driver_assigned_at,omitempty"`
 	AcknowledgedAt     *time.Time     `json:"acknowledged_at,omitempty"`
 	RejectionReason    *string        `json:"rejection_reason,omitempty"`
 	Version            int            `json:"version"`

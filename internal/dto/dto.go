@@ -593,40 +593,6 @@ type GeocodeResult struct {
 }
 
 // ---------------------------------------------------------------------
-// Driver assignment
-// ---------------------------------------------------------------------
-
-type AssignDriverRequest struct {
-	DriverName    string `json:"driver_name"`
-	DriverPhone   string `json:"driver_phone"`
-	DriverVehicle string `json:"driver_vehicle"`
-	DriverPlate   string `json:"driver_plate"`
-}
-
-func (r *AssignDriverRequest) Validate() error {
-	r.DriverName = strings.TrimSpace(r.DriverName)
-	r.DriverVehicle = strings.TrimSpace(r.DriverVehicle)
-	r.DriverPlate = strings.ToUpper(strings.TrimSpace(r.DriverPlate))
-
-	if len(r.DriverName) < 2 || len(r.DriverName) > 100 {
-		return apperror.Invalid("nama kurir harus 2-100 karakter")
-	}
-	normalized, err := NormalizeIndonesianPhone(r.DriverPhone)
-	if err != nil {
-		return apperror.Invalid("WhatsApp kurir tidak valid")
-	}
-	r.DriverPhone = normalized
-
-	if len(r.DriverVehicle) > 100 {
-		return apperror.Invalid("kendaraan maksimal 100 karakter")
-	}
-	if len(r.DriverPlate) > 30 {
-		return apperror.Invalid("nomor polisi maksimal 30 karakter")
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------
 // Analytics
 // ---------------------------------------------------------------------
 

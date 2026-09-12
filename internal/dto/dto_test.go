@@ -215,24 +215,6 @@ func TestUpdateBranchSettingsValidate(t *testing.T) {
 	}
 }
 
-func TestAssignDriverValidate(t *testing.T) {
-	r := AssignDriverRequest{DriverName: "Andi", DriverPhone: "0812 3456 7890", DriverPlate: "ad 1234 xy"}
-	if err := r.Validate(); err != nil {
-		t.Fatalf("valid driver rejected: %v", err)
-	}
-	if r.DriverPhone != "+6281234567890" {
-		t.Errorf("driver phone not normalised: %q", r.DriverPhone)
-	}
-	if r.DriverPlate != "AD 1234 XY" {
-		t.Errorf("plate should be upper-cased, got %q", r.DriverPlate)
-	}
-
-	bad := AssignDriverRequest{DriverName: "A", DriverPhone: "0812"}
-	if err := bad.Validate(); err == nil {
-		t.Error("an invalid driver should be rejected")
-	}
-}
-
 func TestCreateCategoryRequestValidate(t *testing.T) {
 	valid := CreateCategoryRequest{Name: "Snack & Bites", Emoji: "🍟", SortOrder: 6}
 	if err := valid.Validate(); err != nil {

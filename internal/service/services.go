@@ -893,12 +893,6 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 	if newStatus == "rejected" && strings.TrimSpace(reason) == "" {
 		return nil, apperror.Invalid("alasan penolakan wajib diisi")
 	}
-	// A completed delivery must have a named courier so the tracking screen
-	// never claims a handoff without identifying who delivered it.
-	if newStatus == "completed" && order.OrderType != "pickup" && (order.DriverName == nil || *order.DriverName == "") {
-		return nil, apperror.Invalid("tetapkan kurir terlebih dahulu sebelum menyelesaikan pesanan antar")
-	}
-
 	tx, err := s.repo.DB().Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -1001,49 +995,6 @@ func (s *Service) CancelOrder(ctx context.Context, orderID uuid.UUID) (*model.Or
 	}
 
 	return s.UpdateOrderStatus(ctx, orderID, "cancelled", "Dibatalkan oleh pelanggan", order.Version)
-}
-
-// AssignDriver records the courier for an order and pushes the details to the
-// customer's tracking screen.
-func (s *Service) AssignDriver(ctx context.Context, orderID uuid.UUID, req *dto.AssignDriverRequest) (*model.Order, error) {
-	if err := req.Validate(); err != nil {
-		return nil, err
-	}
-
-	order, err := s.repo.FindOrderByID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order == nil {
-		return nil, apperror.ErrNotFound
-	}
-	if order.OrderType == "pickup" {
-		return nil, apperror.Invalid("pesanan ambil sendiri tidak memerlukan kurir")
-	}
-	switch order.Status {
-	case "cancelled", "rejected", "completed", "delivered", "refunded":
-		return nil, apperror.Invalid("pesanan sudah selesai, kurir tidak dapat diubah")
-	}
-
-	if err := s.repo.AssignDriver(ctx, orderID, req.DriverName, req.DriverPhone, req.DriverVehicle, req.DriverPlate); err != nil {
-		return nil, err
-	}
-
-	updated, err := s.repo.FindOrderByID(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-
-	s.hub.Broadcast(ws.OrderRoom(orderID), "driver_assigned", map[string]any{
-		"order_id":       orderID,
-		"driver_name":    req.DriverName,
-		"driver_phone":   req.DriverPhone,
-		"driver_vehicle": req.DriverVehicle,
-		"driver_plate":   req.DriverPlate,
-	})
-	s.hub.Broadcast(ws.BranchRoom(order.BranchID), "driver_assigned", map[string]any{"order_id": orderID})
-
-	return updated, nil
 }
 
 // AcknowledgeOrders clears the admin's unread-order badge.

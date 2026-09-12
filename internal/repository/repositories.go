@@ -387,8 +387,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		       o.customer_name, o.customer_phone, o.delivery_address, o.delivery_notes,
 		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
-		       o.promo_code, o.scheduled_at, o.driver_name, o.driver_phone, o.driver_vehicle,
-		       o.driver_plate, o.driver_rating, o.driver_assigned_at, o.acknowledged_at,
+		       o.promo_code, o.scheduled_at, o.acknowledged_at,
 		       o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug, b.address, b.phone, COALESCE(bs.whatsapp_number, '')
 		FROM orders o
@@ -403,8 +402,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
 		&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 		&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
-		&o.PromoCode, &o.ScheduledAt, &o.DriverName, &o.DriverPhone, &o.DriverVehicle,
-		&o.DriverPlate, &o.DriverRating, &o.DriverAssignedAt, &o.AcknowledgedAt,
+		&o.PromoCode, &o.ScheduledAt, &o.AcknowledgedAt,
 		&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 		&bName, &bSlug, &bAddr, &bPhone, &bWhatsApp,
 	)
@@ -598,8 +596,7 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		       o.customer_name, o.customer_phone, o.delivery_address, o.delivery_notes,
 		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
-		       o.promo_code, o.scheduled_at, o.driver_name, o.driver_phone, o.driver_vehicle,
-		       o.driver_plate, o.driver_rating, o.driver_assigned_at, o.acknowledged_at,
+		       o.promo_code, o.scheduled_at, o.acknowledged_at,
 		       o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug
 		` + baseQuery + fmt.Sprintf(" ORDER BY o.created_at DESC LIMIT $%d OFFSET $%d", idx, idx+1)
@@ -620,8 +617,7 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 			&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
 			&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 			&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
-			&o.PromoCode, &o.ScheduledAt, &o.DriverName, &o.DriverPhone, &o.DriverVehicle,
-			&o.DriverPlate, &o.DriverRating, &o.DriverAssignedAt, &o.AcknowledgedAt,
+			&o.PromoCode, &o.ScheduledAt, &o.AcknowledgedAt,
 			&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 			&bName, &bSlug,
 		); err != nil {
@@ -873,28 +869,8 @@ func (r *Repository) UpdateSettings(ctx context.Context, s *model.BranchSettings
 }
 
 // ---------------------------------------------------------------------
-// Order lifecycle extras: driver assignment & staff acknowledgement
+// Order lifecycle extras: staff acknowledgement
 // ---------------------------------------------------------------------
-
-// AssignDriver records the courier handling an order. Driver details used to
-// come from column defaults ("Andi Pratama", "B 1234 ABC"), which meant every
-// customer saw the same invented courier.
-func (r *Repository) AssignDriver(ctx context.Context, orderID uuid.UUID, name, phone, vehicle, plate string) error {
-	query := `
-		UPDATE orders
-		SET driver_name = $1, driver_phone = $2, driver_vehicle = $3, driver_plate = $4,
-		    driver_assigned_at = NOW(), updated_at = NOW()
-		WHERE id = $5
-	`
-	res, err := r.db.Exec(ctx, query, name, phone, vehicle, plate, orderID)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return apperror.ErrNotFound
-	}
-	return nil
-}
 
 // AcknowledgeOrders marks orders as seen by staff so the admin unread badge is
 // backed by the database and survives a page reload.

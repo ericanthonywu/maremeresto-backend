@@ -678,37 +678,6 @@ func (c *Controller) RefundOrder(w http.ResponseWriter, r *http.Request) {
 	ok(w, order)
 }
 
-func (c *Controller) AssignDriver(w http.ResponseWriter, r *http.Request) {
-	id, err := urlUUID(r, "id")
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	var req dto.AssignDriverRequest
-	if err := decode(w, r, &req); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	existing, err := c.svc.GetOrder(r.Context(), id)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if !c.svc.CanAccessOrder(actor(r), existing) {
-		writeError(w, apperror.ErrForbidden)
-		return
-	}
-
-	order, err := c.svc.AssignDriver(r.Context(), id, &req)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	ok(w, order)
-}
-
 // AcknowledgeOrders clears the admin's unread badge. With no ids in the body
 // every unread order in scope is marked as seen.
 func (c *Controller) AcknowledgeOrders(w http.ResponseWriter, r *http.Request) {
