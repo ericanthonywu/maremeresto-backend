@@ -145,7 +145,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			DistanceMeters:   int(math.Round(distance * 1000)),
 			DeliveryFee:      fee,
 			ServiceFee:       set.ServiceFee,
-			MinOrderAmount:   set.MinOrderAmount,
+			MinOrderAmount:   0, // Minimum order removed
 			EtaMinutes:       EtaMinutes(distance),
 			MaxRadiusKm:      set.MaxDeliveryRadiusKm,
 			WithinRadius:     serviceable,

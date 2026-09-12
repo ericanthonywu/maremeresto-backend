@@ -230,3 +230,38 @@ func TestAssignDriverValidate(t *testing.T) {
 		t.Error("an invalid driver should be rejected")
 	}
 }
+
+func TestCreateCategoryRequestValidate(t *testing.T) {
+	valid := CreateCategoryRequest{Name: "Snack & Bites", Emoji: "🍟", SortOrder: 6}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid category rejected: %v", err)
+	}
+
+	emptyName := CreateCategoryRequest{Name: "  "}
+	if err := emptyName.Validate(); err == nil {
+		t.Error("empty category name should be rejected")
+	}
+}
+
+func TestUpdateBranchProfileAllowsLandlinePhone(t *testing.T) {
+	cases := []string{
+		"(021) 1234567",
+		"021-7654321",
+		"(0271) 712345",
+		"081234567890",
+		"+6281234567890",
+	}
+
+	for _, phone := range cases {
+		r := UpdateBranchProfileRequest{
+			Name:      "Mak Djan",
+			Address:   "Jl. Gatot Subroto No. 10",
+			Phone:     phone,
+			Latitude:  -7.5532,
+			Longitude: 110.8061,
+		}
+		if err := r.Validate(); err != nil {
+			t.Errorf("phone %q should be accepted for branch profile, but got error: %v", phone, err)
+		}
+	}
+}

@@ -298,7 +298,7 @@ func (r *Repository) NextOrderNumber(ctx context.Context, tx pgx.Tx) (string, er
 		return "", err
 	}
 	dateStr := time.Now().Format("20060102")
-	return fmt.Sprintf("OLG-%s-%04d", dateStr, seq), nil
+	return fmt.Sprintf("MRM-%s-%04d", dateStr, seq), nil
 }
 
 func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Order) error {
@@ -475,6 +475,9 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		baseQuery += fmt.Sprintf(" AND o.status = $%d", idx)
 		args = append(args, status)
 		idx++
+	} else if f.UserID == nil {
+		// Admin orders list: do not include unpaid pending orders unless explicitly asked
+		baseQuery += " AND o.status != 'pending'"
 	}
 	if search != "" {
 		baseQuery += fmt.Sprintf(" AND (o.order_number ILIKE $%d OR o.customer_name ILIKE $%d OR o.customer_phone ILIKE $%d)", idx, idx, idx)
@@ -795,7 +798,7 @@ func (r *Repository) CountUnacknowledgedOrders(ctx context.Context, branchID *uu
 	query := `
 		SELECT COUNT(*) FROM orders
 		WHERE acknowledged_at IS NULL
-		  AND status NOT IN ('cancelled', 'rejected', 'completed')
+		  AND status NOT IN ('pending', 'cancelled', 'rejected', 'completed')
 		  AND ($1::uuid IS NULL OR branch_id = $1)
 	`
 	var count int
@@ -850,6 +853,61 @@ func (r *Repository) CategoryExists(ctx context.Context, id uuid.UUID) (bool, er
 	var exists bool
 	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM categories WHERE id = $1)`, id).Scan(&exists)
 	return exists, err
+}
+
+func (r *Repository) FindCategoryByID(ctx context.Context, id uuid.UUID) (*model.Category, error) {
+	query := `SELECT id, name, slug, emoji, sort_order, created_at FROM categories WHERE id = $1`
+	var c model.Category
+	err := r.db.QueryRow(ctx, query, id).Scan(&c.ID, &c.Name, &c.Slug, &c.Emoji, &c.SortOrder, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *Repository) CategorySlugExists(ctx context.Context, slug string, excludeID *uuid.UUID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM categories WHERE slug = $1 AND ($2::uuid IS NULL OR id != $2))`
+	var exists bool
+	err := r.db.QueryRow(ctx, query, slug, excludeID).Scan(&exists)
+	return exists, err
+}
+
+func (r *Repository) CountMenuItemsByCategoryID(ctx context.Context, categoryID uuid.UUID) (int, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM menu_items WHERE category_id = $1`, categoryID).Scan(&count)
+	return count, err
+}
+
+func (r *Repository) CreateCategory(ctx context.Context, c *model.Category) error {
+	query := `INSERT INTO categories (id, name, slug, emoji, sort_order, created_at)
+	          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	return r.db.QueryRow(ctx, query, c.ID, c.Name, c.Slug, c.Emoji, c.SortOrder, c.CreatedAt).Scan(&c.ID)
+}
+
+func (r *Repository) UpdateCategory(ctx context.Context, c *model.Category) error {
+	query := `UPDATE categories SET name = $1, emoji = $2, sort_order = $3 WHERE id = $4`
+	cmd, err := r.db.Exec(ctx, query, c.Name, c.Emoji, c.SortOrder, c.ID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteCategory(ctx context.Context, id uuid.UUID) error {
+	cmd, err := r.db.Exec(ctx, `DELETE FROM categories WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 // ListSettingsByBranch returns every branch's settings keyed by branch id, so

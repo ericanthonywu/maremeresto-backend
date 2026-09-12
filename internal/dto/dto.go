@@ -167,7 +167,7 @@ type UpdateOrderStatusRequest struct {
 
 type CreatePaymentRequest struct {
 	OrderID        uuid.UUID `json:"order_id" validate:"required"`
-	PaymentMethod  string    `json:"payment_method" validate:"required,oneof=qris gopay shopeepay"`
+	PaymentMethod  string    `json:"payment_method"`
 	IdempotencyKey string    `json:"idempotency_key" validate:"required"`
 }
 
@@ -277,7 +277,56 @@ type ToggleAvailabilityRequest struct {
 	IsAvailable bool `json:"is_available"`
 }
 
+type CreateCategoryRequest struct {
+	Name      string `json:"name"`
+	Emoji     string `json:"emoji"`
+	SortOrder int    `json:"sort_order"`
+}
+
+func (r *CreateCategoryRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	r.Emoji = strings.TrimSpace(r.Emoji)
+	if r.Name == "" || len(r.Name) > 100 {
+		return apperror.Invalid("nama kategori wajib diisi, maksimal 100 karakter")
+	}
+	if r.Emoji == "" {
+		r.Emoji = "🍽️"
+	}
+	if len(r.Emoji) > 20 {
+		return apperror.Invalid("emoji maksimal 20 karakter")
+	}
+	if r.SortOrder < 0 {
+		r.SortOrder = 0
+	}
+	return nil
+}
+
+type UpdateCategoryRequest struct {
+	Name      string `json:"name"`
+	Emoji     string `json:"emoji"`
+	SortOrder int    `json:"sort_order"`
+}
+
+func (r *UpdateCategoryRequest) Validate() error {
+	r.Name = strings.TrimSpace(r.Name)
+	r.Emoji = strings.TrimSpace(r.Emoji)
+	if r.Name == "" || len(r.Name) > 100 {
+		return apperror.Invalid("nama kategori wajib diisi, maksimal 100 karakter")
+	}
+	if r.Emoji == "" {
+		r.Emoji = "🍽️"
+	}
+	if len(r.Emoji) > 20 {
+		return apperror.Invalid("emoji maksimal 20 karakter")
+	}
+	if r.SortOrder < 0 {
+		r.SortOrder = 0
+	}
+	return nil
+}
+
 type UpdateBranchSettingsRequest struct {
+	ID                    *uuid.UUID     `json:"id,omitempty"`
 	BranchID              *uuid.UUID     `json:"branch_id"`
 	OperatingHours        map[string]any `json:"operating_hours"`
 	MaxDeliveryRadiusKm   int            `json:"max_delivery_radius_km"`
@@ -291,6 +340,7 @@ type UpdateBranchSettingsRequest struct {
 	FreeDeliveryThreshold int            `json:"free_delivery_threshold"`
 	WhatsappNumber        string         `json:"whatsapp_number"`
 	Description           string         `json:"description"`
+	UpdatedAt             any            `json:"updated_at,omitempty"`
 }
 
 // Validate rejects settings that would make the storefront unusable, e.g. a
@@ -320,11 +370,24 @@ func (r *UpdateBranchSettingsRequest) Validate() error {
 		return apperror.Invalid("ambang gratis ongkir tidak valid")
 	}
 	if strings.TrimSpace(r.WhatsappNumber) != "" {
-		normalized, err := NormalizeIndonesianPhone(r.WhatsappNumber)
-		if err != nil {
-			return apperror.Invalid("nomor WhatsApp outlet tidak valid")
+		if len(r.WhatsappNumber) > 30 {
+			return apperror.Invalid("nomor WhatsApp outlet maksimal 30 karakter")
 		}
-		r.WhatsappNumber = normalized
+		if normalized, err := NormalizeIndonesianPhone(r.WhatsappNumber); err == nil {
+			r.WhatsappNumber = normalized
+		} else {
+			// Allow landlines / international / alternate numbers with 6-20 digits
+			cleaned := strings.Map(func(rn rune) rune {
+				if rn >= '0' && rn <= '9' {
+					return rn
+				}
+				return -1
+			}, r.WhatsappNumber)
+			if len(cleaned) < 6 || len(cleaned) > 20 {
+				return apperror.Invalid("nomor WhatsApp outlet tidak valid")
+			}
+			r.WhatsappNumber = strings.TrimSpace(r.WhatsappNumber)
+		}
 	}
 	if len(r.Description) > 500 {
 		return apperror.Invalid("deskripsi maksimal 500 karakter")
@@ -371,11 +434,13 @@ func (r *UpdateBranchProfileRequest) Validate() error {
 		return apperror.Invalid("alamat outlet wajib diisi")
 	}
 	if r.Phone != "" {
-		normalized, err := NormalizeIndonesianPhone(r.Phone)
-		if err != nil {
-			return apperror.Invalid("nomor telepon outlet tidak valid")
+		if len(r.Phone) > 30 {
+			return apperror.Invalid("nomor telepon outlet maksimal 30 karakter")
 		}
-		r.Phone = normalized
+		// Normalise mobile numbers (+628...); allow landline numbers like (021), (0271) as-is
+		if normalized, err := NormalizeIndonesianPhone(r.Phone); err == nil {
+			r.Phone = normalized
+		}
 	}
 	if r.Latitude < -90 || r.Latitude > 90 || r.Longitude < -180 || r.Longitude > 180 {
 		return apperror.Invalid("koordinat outlet tidak valid")

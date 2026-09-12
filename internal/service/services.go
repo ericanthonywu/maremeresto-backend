@@ -5,6 +5,7 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -16,6 +17,8 @@ import (
 	"log/slog"
 	"math"
 	"mime/multipart"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -300,6 +303,101 @@ func (s *Service) GetBranchBySlug(ctx context.Context, slug string) (*model.Bran
 
 func (s *Service) ListCategories(ctx context.Context) ([]model.Category, error) {
 	return s.repo.ListCategories(ctx)
+}
+
+func slugify(val string) string {
+	val = strings.ToLower(strings.TrimSpace(val))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range val {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash && b.Len() > 0 {
+			b.WriteRune('-')
+			lastDash = true
+		}
+	}
+	res := strings.Trim(b.String(), "-")
+	if res == "" {
+		res = "kategori"
+	}
+	if len(res) > 40 {
+		res = res[:40]
+	}
+	return res
+}
+
+func (s *Service) CreateCategory(ctx context.Context, req *dto.CreateCategoryRequest) (*model.Category, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	baseSlug := slugify(req.Name)
+	slug := baseSlug
+	suffix := 1
+	for {
+		exists, err := s.repo.CategorySlugExists(ctx, slug, nil)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			break
+		}
+		slug = fmt.Sprintf("%s-%d", baseSlug, suffix)
+		suffix++
+	}
+
+	cat := &model.Category{
+		ID:        uuid.New(),
+		Name:      req.Name,
+		Slug:      slug,
+		Emoji:     req.Emoji,
+		SortOrder: req.SortOrder,
+		CreatedAt: time.Now(),
+	}
+	if err := s.repo.CreateCategory(ctx, cat); err != nil {
+		return nil, err
+	}
+	return cat, nil
+}
+
+func (s *Service) UpdateCategory(ctx context.Context, id uuid.UUID, req *dto.UpdateCategoryRequest) (*model.Category, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	existing, err := s.repo.FindCategoryByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	existing.Name = req.Name
+	existing.Emoji = req.Emoji
+	existing.SortOrder = req.SortOrder
+	if err := s.repo.UpdateCategory(ctx, existing); err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+func (s *Service) DeleteCategory(ctx context.Context, id uuid.UUID) error {
+	existing, err := s.repo.FindCategoryByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return apperror.ErrNotFound
+	}
+	count, err := s.repo.CountMenuItemsByCategoryID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return apperror.Invalid(fmt.Sprintf("kategori tidak dapat dihapus karena masih digunakan oleh %d item menu", count))
+	}
+	return s.repo.DeleteCategory(ctx, id)
 }
 
 func (s *Service) ListMenuByBranch(ctx context.Context, branchID uuid.UUID) ([]model.MenuItem, error) {
@@ -687,11 +785,8 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 
 	order.Branch = branch
 
-	// 6. Notify the outlet handling this order, and the owner's network feed.
-	//    Both rooms are access-controlled; there is no all-sockets fan-out.
-	s.hub.Broadcast(ws.BranchRoom(branch.ID), "new_order", order)
-	s.hub.Broadcast(ws.RoomOwner, "new_order", order)
-
+	// Do not notify admin rooms yet — the order enters the admin system with
+	// notifications only after the customer completes payment.
 	return order, nil
 }
 
@@ -897,9 +992,12 @@ func (s *Service) CountUnacknowledgedOrders(ctx context.Context, branchID *uuid.
 // ---------------------------------------------------------------------
 func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentRequest) (*model.Payment, error) {
 	switch req.PaymentMethod {
-	case "qris", "gopay", "shopeepay":
+	case "qris", "gopay", "shopeepay", "snap", "midtrans", "":
 	default:
 		return nil, apperror.Invalid("metode pembayaran tidak didukung")
+	}
+	if req.PaymentMethod == "" {
+		req.PaymentMethod = "snap"
 	}
 
 	// Replaying the same Idempotency-Key returns the original payment rather
@@ -957,7 +1055,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 			Phone: order.CustomerPhone,
 		},
 		Items:           snapItems(order),
-		EnabledPayments: enabledPaymentsFor(req.PaymentMethod),
+		EnabledPayments: nil, // Allow full Snap channels (QRIS, GoPay, ShopeePay, Bank Transfer, etc.)
 		Expiry: &snap.ExpiryDetails{
 			Unit:     "minute",
 			Duration: int64(paymentWindow / time.Minute),
@@ -1194,11 +1292,57 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	if advanced {
 		order.Status = "accepted"
 		s.broadcastStatus(order, "Pembayaran lunas, pesanan Anda mulai diproses.")
+		s.hub.Broadcast(ws.BranchRoom(order.BranchID), "new_order", order)
 		s.hub.Broadcast(ws.BranchRoom(order.BranchID), "order_paid", order)
+		s.hub.Broadcast(ws.RoomOwner, "new_order", order)
 		s.hub.Broadcast(ws.RoomOwner, "order_paid", order)
 	}
 
 	return nil
+}
+
+// SyncPaymentWithMidtrans actively polls Midtrans status API to reconcile pending payments
+func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber string) (*model.Payment, error) {
+	baseURL := "https://api.sandbox.midtrans.com"
+	if s.cfg.MidtransIsProd {
+		baseURL = "https://api.midtrans.com"
+	}
+
+	reqURL := fmt.Sprintf("%s/v2/%s/status", baseURL, url.PathEscape(orderNumber))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(s.cfg.MidtransServerKey, "")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("midtrans status check returned %d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	if txStatus, _ := payload["transaction_status"].(string); txStatus == "settlement" || txStatus == "capture" {
+		if err := s.HandleMidtransWebhook(ctx, payload); err != nil {
+			slog.Warn("sync midtrans webhook handler returned error", "err", err)
+		}
+	}
+
+	order, err := s.repo.FindOrderByOrderNumber(ctx, orderNumber)
+	if err != nil || order == nil {
+		return nil, err
+	}
+	return s.repo.FindPaymentByOrderID(ctx, order.ID)
 }
 
 // ---------------------------------------------------------------------

@@ -122,6 +122,10 @@ func registerRESTRoutes(
 		admin.Put("/api/v1/admin/orders/{id}/driver", ctrl.AssignDriver)
 		admin.Post("/api/v1/admin/orders/acknowledge", ctrl.AcknowledgeOrders)
 
+		admin.Post("/api/v1/admin/categories", ctrl.CreateCategory)
+		admin.Put("/api/v1/admin/categories/{id}", ctrl.UpdateCategory)
+		admin.Delete("/api/v1/admin/categories/{id}", ctrl.DeleteCategory)
+
 		admin.Post("/api/v1/admin/menu", ctrl.CreateMenuItem)
 		admin.Put("/api/v1/admin/menu/{id}", ctrl.UpdateMenuItem)
 		admin.Put("/api/v1/admin/menu/{id}/availability", ctrl.ToggleMenuItemAvailability)

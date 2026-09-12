@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -62,7 +63,7 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) error {
 		if errors.As(err, &maxErr) {
 			return apperror.Invalid("data yang dikirim terlalu besar")
 		}
-		return apperror.Invalid("format data tidak valid")
+		return apperror.Invalid(fmt.Sprintf("format data tidak valid: %v", err))
 	}
 	// Reject trailing content after the JSON document.
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
@@ -233,6 +234,56 @@ func (c *Controller) ListCategories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok(w, categories)
+}
+
+func (c *Controller) CreateCategory(w http.ResponseWriter, r *http.Request) {
+	var req dto.CreateCategoryRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	cat, err := c.svc.CreateCategory(r.Context(), &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"success": true, "data": cat})
+}
+
+func (c *Controller) UpdateCategory(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req dto.UpdateCategoryRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	cat, err := c.svc.UpdateCategory(r.Context(), id, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, cat)
+}
+
+func (c *Controller) DeleteCategory(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if err := c.svc.DeleteCategory(r.Context(), id); err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"id": id})
 }
 
 func (c *Controller) ListMenuByBranch(w http.ResponseWriter, r *http.Request) {
@@ -633,6 +684,9 @@ func (c *Controller) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apperror.Invalid("Idempotency-Key terlalu panjang"))
 		return
 	}
+	if strings.TrimSpace(req.PaymentMethod) == "" {
+		req.PaymentMethod = "snap"
+	}
 
 	existing, err := c.svc.GetOrder(r.Context(), req.OrderID)
 	if err != nil {
@@ -674,6 +728,16 @@ func (c *Controller) GetPaymentStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+
+	if payment != nil && payment.Status == "pending" {
+		if synced, syncErr := c.svc.SyncPaymentWithMidtrans(r.Context(), order.OrderNumber); syncErr == nil && synced != nil {
+			payment = synced
+			if updatedOrder, oErr := c.svc.GetOrder(r.Context(), orderID); oErr == nil && updatedOrder != nil {
+				order = updatedOrder
+			}
+		}
+	}
+
 	ok(w, map[string]any{
 		"order_status":   order.Status,
 		"payment_status": payment.Status,
