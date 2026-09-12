@@ -430,6 +430,7 @@ type UpdateBranchSettingsRequest struct {
 	FreeDeliveryThreshold int            `json:"free_delivery_threshold"`
 	WhatsappNumber        string         `json:"whatsapp_number"`
 	Description           string         `json:"description"`
+	HalalCertificateID    string         `json:"halal_certificate_id"`
 	UpdatedAt             any            `json:"updated_at,omitempty"`
 }
 
@@ -481,6 +482,10 @@ func (r *UpdateBranchSettingsRequest) Validate() error {
 	}
 	if len(r.Description) > 500 {
 		return apperror.Invalid("deskripsi maksimal 500 karakter")
+	}
+	r.HalalCertificateID = strings.TrimSpace(r.HalalCertificateID)
+	if len(r.HalalCertificateID) > 160 {
+		return apperror.Invalid("ID sertifikat halal maksimal 160 karakter")
 	}
 	for _, key := range []string{"weekday", "weekend"} {
 		entry, ok := r.OperatingHours[key].(map[string]any)

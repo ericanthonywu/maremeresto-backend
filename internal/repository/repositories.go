@@ -824,7 +824,8 @@ func (r *Repository) FindSettingsByBranchID(ctx context.Context, branchID uuid.U
 	query := `
 		SELECT id, branch_id, operating_hours, max_delivery_radius_km, base_delivery_fee_near,
 		       base_delivery_fee_mid, base_delivery_fee_far, near_threshold_km, mid_threshold_km,
-		       service_fee, min_order_amount, free_delivery_threshold, whatsapp_number, description, updated_at
+		       service_fee, min_order_amount, free_delivery_threshold, whatsapp_number, description,
+		       halal_certificate_id, updated_at
 		FROM branch_settings WHERE branch_id = $1
 	`
 	var s model.BranchSettings
@@ -832,7 +833,8 @@ func (r *Repository) FindSettingsByBranchID(ctx context.Context, branchID uuid.U
 	err := r.db.QueryRow(ctx, query, branchID).Scan(
 		&s.ID, &s.BranchID, &hoursJSON, &s.MaxDeliveryRadiusKm, &s.BaseDeliveryFeeNear,
 		&s.BaseDeliveryFeeMid, &s.BaseDeliveryFeeFar, &s.NearThresholdKm, &s.MidThresholdKm,
-		&s.ServiceFee, &s.MinOrderAmount, &s.FreeDeliveryThreshold, &s.WhatsappNumber, &s.Description, &s.UpdatedAt,
+		&s.ServiceFee, &s.MinOrderAmount, &s.FreeDeliveryThreshold, &s.WhatsappNumber, &s.Description,
+		&s.HalalCertificateID, &s.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -851,13 +853,13 @@ func (r *Repository) UpdateSettings(ctx context.Context, s *model.BranchSettings
 		SET operating_hours = $1, max_delivery_radius_km = $2, base_delivery_fee_near = $3,
 		    base_delivery_fee_mid = $4, base_delivery_fee_far = $5, near_threshold_km = $6,
 		    mid_threshold_km = $7, service_fee = $8, min_order_amount = $9, free_delivery_threshold = $10,
-		    whatsapp_number = $11, description = $12, updated_at = NOW()
-		WHERE branch_id = $13
+		    whatsapp_number = $11, description = $12, halal_certificate_id = $13, updated_at = NOW()
+		WHERE branch_id = $14
 	`
 	res, err := r.db.Exec(ctx, query,
 		hoursBytes, s.MaxDeliveryRadiusKm, s.BaseDeliveryFeeNear, s.BaseDeliveryFeeMid, s.BaseDeliveryFeeFar,
 		s.NearThresholdKm, s.MidThresholdKm, s.ServiceFee, s.MinOrderAmount, s.FreeDeliveryThreshold,
-		s.WhatsappNumber, s.Description, s.BranchID,
+		s.WhatsappNumber, s.Description, s.HalalCertificateID, s.BranchID,
 	)
 	if err != nil {
 		return err
@@ -1016,7 +1018,8 @@ func (r *Repository) ListSettingsByBranch(ctx context.Context) (map[uuid.UUID]mo
 	query := `
 		SELECT id, branch_id, operating_hours, max_delivery_radius_km, base_delivery_fee_near,
 		       base_delivery_fee_mid, base_delivery_fee_far, near_threshold_km, mid_threshold_km,
-		       service_fee, min_order_amount, free_delivery_threshold, whatsapp_number, description, updated_at
+		       service_fee, min_order_amount, free_delivery_threshold, whatsapp_number, description,
+		       halal_certificate_id, updated_at
 		FROM branch_settings
 	`
 	rows, err := r.db.Query(ctx, query)
@@ -1032,7 +1035,8 @@ func (r *Repository) ListSettingsByBranch(ctx context.Context) (map[uuid.UUID]mo
 		if err := rows.Scan(
 			&s.ID, &s.BranchID, &hoursJSON, &s.MaxDeliveryRadiusKm, &s.BaseDeliveryFeeNear,
 			&s.BaseDeliveryFeeMid, &s.BaseDeliveryFeeFar, &s.NearThresholdKm, &s.MidThresholdKm,
-			&s.ServiceFee, &s.MinOrderAmount, &s.FreeDeliveryThreshold, &s.WhatsappNumber, &s.Description, &s.UpdatedAt,
+			&s.ServiceFee, &s.MinOrderAmount, &s.FreeDeliveryThreshold, &s.WhatsappNumber, &s.Description,
+			&s.HalalCertificateID, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

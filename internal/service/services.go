@@ -312,6 +312,7 @@ func (s *Service) ListBranches(ctx context.Context) ([]model.Branch, error) {
 		branches[i].IsOpenNow = branches[i].IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 		branches[i].TodayHours = FormatOperatingHours(set.OperatingHours, now)
 		branches[i].WhatsappNumber = set.WhatsappNumber
+		branches[i].HalalCertificateID = set.HalalCertificateID
 	}
 	return branches, nil
 }
@@ -330,6 +331,7 @@ func (s *Service) GetBranchBySlug(ctx context.Context, slug string) (*model.Bran
 	b.IsOpenNow = b.IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 	b.TodayHours = FormatOperatingHours(set.OperatingHours, now)
 	b.WhatsappNumber = set.WhatsappNumber
+	b.HalalCertificateID = set.HalalCertificateID
 	return b, nil
 }
 
@@ -1601,6 +1603,7 @@ func (s *Service) UpdateBranchSettings(ctx context.Context, branchID uuid.UUID, 
 		MinOrderAmount:        req.MinOrderAmount,
 		FreeDeliveryThreshold: 0,
 		WhatsappNumber:        req.WhatsappNumber,
+		HalalCertificateID:    req.HalalCertificateID,
 	}
 	if req.Description != "" {
 		settings.Description = &req.Description

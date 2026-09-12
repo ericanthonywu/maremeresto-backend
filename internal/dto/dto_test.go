@@ -199,6 +199,9 @@ func TestUpdateBranchSettingsValidate(t *testing.T) {
 		"fees not increasing":      func(r *UpdateBranchSettingsRequest) { r.BaseDeliveryFeeFar = 1000 },
 		"negative fee":             func(r *UpdateBranchSettingsRequest) { r.BaseDeliveryFeeNear = -1 },
 		"bad whatsapp":             func(r *UpdateBranchSettingsRequest) { r.WhatsappNumber = "12345" },
+		"halal certificate too long": func(r *UpdateBranchSettingsRequest) {
+			r.HalalCertificateID = strings.Repeat("A", 161)
+		},
 		"bad clock": func(r *UpdateBranchSettingsRequest) {
 			r.OperatingHours = map[string]any{"weekday": map[string]any{"open": "8", "close": "22:00"}}
 		},
