@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha512"
 	"crypto/subtle"
@@ -953,7 +954,7 @@ func (s *Service) AssignDriver(ctx context.Context, orderID uuid.UUID, req *dto.
 		return nil, apperror.Invalid("pesanan ambil sendiri tidak memerlukan kurir")
 	}
 	switch order.Status {
-	case "cancelled", "rejected", "completed", "delivered":
+	case "cancelled", "rejected", "completed", "delivered", "refunded":
 		return nil, apperror.Invalid("pesanan sudah selesai, kurir tidak dapat diubah")
 	}
 
@@ -1221,6 +1222,16 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 		return apperror.ErrNotFound
 	}
 
+	// Refunds are applied synchronously by RefundPayment when staff act in the
+	// admin portal. This notification is Midtrans's own async confirmation of
+	// that same refund, so there is nothing left to do here — running it
+	// through the generic status switch below would wipe paid_at (it only
+	// ever sets it, never preserves it) and stamp over the refund bookkeeping.
+	if txStatus == "refund" || txStatus == "partial_refund" {
+		slog.Info("midtrans refund notification acknowledged", "order_id", orderID, "status", txStatus)
+		return nil
+	}
+
 	// Confirm the amount the gateway settled matches what we billed.
 	if grossAmount != "" {
 		if amount, convErr := strconv.ParseFloat(grossAmount, 64); convErr == nil {
@@ -1343,6 +1354,125 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 		return nil, err
 	}
 	return s.repo.FindPaymentByOrderID(ctx, order.ID)
+}
+
+// RefundPayment is the admin-portal counterpart to CreatePayment: staff issue
+// a refund (full or partial) against a settled payment through Midtrans, and
+// the order moves to the terminal "refunded" status. Unlike the ordinary
+// status transitions, a refund can be issued from any paid status (accepted
+// through completed, and even a rejected/cancelled order that was already
+// charged) — the only real requirement is that the payment settled and has
+// not already been refunded.
+func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount int, reason string, actorID uuid.UUID, expectedVersion int) (*model.Order, error) {
+	order, err := s.repo.FindOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil {
+		return nil, apperror.ErrNotFound
+	}
+	if order.Version != expectedVersion {
+		return nil, apperror.ErrConcurrentModification
+	}
+	if order.Status == "refunded" {
+		return nil, apperror.Invalid("pesanan ini sudah direfund")
+	}
+	if !order.Payment.Refundable() {
+		return nil, apperror.Invalid("pesanan ini belum lunas, tidak dapat direfund")
+	}
+
+	remaining := order.Payment.RemainingRefundable()
+	if remaining <= 0 {
+		return nil, apperror.Invalid("tidak ada sisa dana yang dapat direfund untuk pesanan ini")
+	}
+	if amount <= 0 {
+		amount = remaining
+	}
+	if amount > remaining {
+		return nil, apperror.Invalid(fmt.Sprintf("jumlah refund melebihi sisa yang dapat dikembalikan (maks Rp %s)", formatRupiah(remaining)))
+	}
+
+	// Stable per order, so a retried request after a network hiccup reaches
+	// Midtrans as the same refund rather than a second one.
+	refundKey := order.OrderNumber + "-refund"
+
+	response, refundErr := s.midtransRefund(ctx, order.OrderNumber, refundKey, amount, reason)
+	if refundErr != nil {
+		slog.Error("midtrans refund failed", "order_number", order.OrderNumber, "err", refundErr)
+		return nil, fmt.Errorf("%w", apperror.ErrMidtransFailed)
+	}
+
+	tx, err := s.repo.DB().Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := s.repo.RecordRefund(ctx, tx, order.ID, amount, reason, &actorID, response); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "refunded", reason, expectedVersion); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.FindOrderByID(ctx, order.ID)
+	if err != nil || updated == nil {
+		updated = order
+		updated.Status = "refunded"
+	}
+
+	s.broadcastStatus(updated, "Pesanan direfund, dana akan kembali sesuai kebijakan Midtrans/penyedia pembayaran.")
+	return updated, nil
+}
+
+// midtransRefund calls Midtrans's Core API refund endpoint directly: the
+// snap-go SDK used for CreateTransaction has no refund support of its own.
+func (s *Service) midtransRefund(ctx context.Context, orderNumber, refundKey string, amount int, reason string) (map[string]any, error) {
+	baseURL := "https://api.sandbox.midtrans.com"
+	if s.cfg.MidtransIsProd {
+		baseURL = "https://api.midtrans.com"
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"refund_key": refundKey,
+		"amount":     amount,
+		"reason":     reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	reqURL := fmt.Sprintf("%s/v2/%s/refund", baseURL, url.PathEscape(orderNumber))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(s.cfg.MidtransServerKey, "")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("midtrans refund returned %d and an unreadable body", resp.StatusCode)
+	}
+
+	statusCode, _ := payload["status_code"].(string)
+	if resp.StatusCode >= 300 || (statusCode != "" && statusCode != "200" && statusCode != "201") {
+		msg, _ := payload["status_message"].(string)
+		return payload, fmt.Errorf("midtrans refund rejected (http %d, status_code %s): %s", resp.StatusCode, statusCode, msg)
+	}
+
+	return payload, nil
 }
 
 // ---------------------------------------------------------------------

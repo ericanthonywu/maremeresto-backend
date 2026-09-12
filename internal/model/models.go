@@ -140,23 +140,47 @@ type OrderItem struct {
 }
 
 type Payment struct {
-	ID                    uuid.UUID      `json:"id"`
-	OrderID               uuid.UUID      `json:"order_id"`
-	MidtransOrderID       string         `json:"midtrans_order_id"`
-	PaymentMethod         string         `json:"payment_method"` // qris, gopay, shopeepay
-	PaymentType           string         `json:"payment_type"`
-	Status                string         `json:"status"` // pending, settlement, expire, cancel
-	Amount                int            `json:"amount"`
-	IdempotencyKey        string         `json:"idempotency_key"`
-	SnapToken             *string        `json:"snap_token,omitempty"`
-	SnapRedirectURL       *string        `json:"snap_redirect_url,omitempty"`
-	QRString              *string        `json:"qr_string,omitempty"`
-	MidtransTransactionID *string        `json:"midtrans_transaction_id,omitempty"`
-	MidtransResponse      map[string]any `json:"midtrans_response,omitempty"`
-	PaidAt                *time.Time     `json:"paid_at,omitempty"`
-	ExpiresAt             time.Time      `json:"expires_at"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	ID                     uuid.UUID      `json:"id"`
+	OrderID                uuid.UUID      `json:"order_id"`
+	MidtransOrderID        string         `json:"midtrans_order_id"`
+	PaymentMethod          string         `json:"payment_method"` // qris, gopay, shopeepay
+	PaymentType            string         `json:"payment_type"`
+	Status                 string         `json:"status"` // pending, settlement, expire, cancel
+	Amount                 int            `json:"amount"`
+	IdempotencyKey         string         `json:"idempotency_key"`
+	SnapToken              *string        `json:"snap_token,omitempty"`
+	SnapRedirectURL        *string        `json:"snap_redirect_url,omitempty"`
+	QRString               *string        `json:"qr_string,omitempty"`
+	MidtransTransactionID  *string        `json:"midtrans_transaction_id,omitempty"`
+	MidtransResponse       map[string]any `json:"midtrans_response,omitempty"`
+	PaidAt                 *time.Time     `json:"paid_at,omitempty"`
+	ExpiresAt              time.Time      `json:"expires_at"`
+	RefundAmount           int            `json:"refund_amount"`
+	RefundReason           *string        `json:"refund_reason,omitempty"`
+	RefundedAt             *time.Time     `json:"refunded_at,omitempty"`
+	RefundedBy             *uuid.UUID     `json:"refunded_by,omitempty"`
+	MidtransRefundResponse map[string]any `json:"midtrans_refund_response,omitempty"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+}
+
+// Refundable reports whether this payment can still be sent to Midtrans for a
+// refund: it must have actually settled, and not have been refunded already.
+func (p *Payment) Refundable() bool {
+	return p != nil && p.Status == "settlement"
+}
+
+// RemainingRefundable is the amount still eligible for refund (the original
+// charge minus whatever has already been refunded).
+func (p *Payment) RemainingRefundable() int {
+	if p == nil {
+		return 0
+	}
+	remaining := p.Amount - p.RefundAmount
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 type Promo struct {

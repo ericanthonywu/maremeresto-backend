@@ -609,14 +609,16 @@ func (r *Repository) FindPaymentByOrderID(ctx context.Context, orderID uuid.UUID
 	query := `
 		SELECT id, order_id, midtrans_order_id, payment_method, payment_type, status, amount,
 		       idempotency_key, snap_token, snap_redirect_url, qr_string, midtrans_transaction_id,
-		       paid_at, expires_at, created_at, updated_at
+		       paid_at, expires_at, refund_amount, refund_reason, refunded_at, refunded_by,
+		       created_at, updated_at
 		FROM payments WHERE order_id = $1
 	`
 	var p model.Payment
 	err := r.db.QueryRow(ctx, query, orderID).Scan(
 		&p.ID, &p.OrderID, &p.MidtransOrderID, &p.PaymentMethod, &p.PaymentType, &p.Status, &p.Amount,
 		&p.IdempotencyKey, &p.SnapToken, &p.SnapRedirectURL, &p.QRString, &p.MidtransTransactionID,
-		&p.PaidAt, &p.ExpiresAt, &p.CreatedAt, &p.UpdatedAt,
+		&p.PaidAt, &p.ExpiresAt, &p.RefundAmount, &p.RefundReason, &p.RefundedAt, &p.RefundedBy,
+		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -672,6 +674,26 @@ func (r *Repository) UpdatePaymentStatus(ctx context.Context, tx pgx.Tx, midtran
 	`
 	_, err := tx.Exec(ctx, query, status, txID, jsonBytes, paidAt, midtransOrderID)
 	return err
+}
+
+// RecordRefund persists a confirmed Midtrans refund on the payment row.
+// refundedBy is nil-able so a system-initiated refund can still be recorded.
+func (r *Repository) RecordRefund(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, amount int, reason string, refundedBy *uuid.UUID, responseJSON map[string]any) error {
+	jsonBytes, _ := json.Marshal(responseJSON)
+	query := `
+		UPDATE payments
+		SET status = 'refund', refund_amount = refund_amount + $1, refund_reason = $2,
+		    refunded_at = NOW(), refunded_by = $3, midtrans_refund_response = $4, updated_at = NOW()
+		WHERE order_id = $5
+	`
+	res, err := tx.Exec(ctx, query, amount, reason, refundedBy, jsonBytes, orderID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------

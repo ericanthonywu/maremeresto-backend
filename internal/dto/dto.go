@@ -171,6 +171,28 @@ type CreatePaymentRequest struct {
 	IdempotencyKey string    `json:"idempotency_key" validate:"required"`
 }
 
+// RefundOrderRequest is issued by staff against a paid order. Amount is
+// optional: zero means "refund whatever is still outstanding".
+type RefundOrderRequest struct {
+	Amount          int    `json:"amount"`
+	Reason          string `json:"reason" validate:"required"`
+	ExpectedVersion int    `json:"expected_version"`
+}
+
+func (r *RefundOrderRequest) Validate() error {
+	r.Reason = strings.TrimSpace(r.Reason)
+	if r.Reason == "" {
+		return apperror.Invalid("alasan refund wajib diisi")
+	}
+	if len(r.Reason) > 500 {
+		return apperror.Invalid("alasan refund maksimal 500 karakter")
+	}
+	if r.Amount < 0 {
+		return apperror.Invalid("jumlah refund tidak boleh negatif")
+	}
+	return nil
+}
+
 type ValidatePromoRequest struct {
 	Code        string `json:"code" validate:"required"`
 	BranchID    string `json:"branch_id"`

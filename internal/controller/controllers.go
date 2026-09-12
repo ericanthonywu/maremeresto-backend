@@ -569,6 +569,44 @@ func (c *Controller) UpdateOrderStatus(w http.ResponseWriter, r *http.Request) {
 	ok(w, order)
 }
 
+// RefundOrder issues a Midtrans refund (full or partial) against a paid
+// order and moves it to the terminal "refunded" status.
+func (c *Controller) RefundOrder(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req dto.RefundOrderRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := req.Validate(); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	existing, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	claims := actor(r)
+	if !c.svc.CanAccessOrder(claims, existing) {
+		writeError(w, apperror.ErrForbidden)
+		return
+	}
+
+	order, err := c.svc.RefundPayment(r.Context(), id, req.Amount, req.Reason, claims.UserID, req.ExpectedVersion)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, order)
+}
+
 func (c *Controller) AssignDriver(w http.ResponseWriter, r *http.Request) {
 	id, err := urlUUID(r, "id")
 	if err != nil {
@@ -604,20 +642,25 @@ func (c *Controller) AssignDriver(w http.ResponseWriter, r *http.Request) {
 // every unread order in scope is marked as seen.
 func (c *Controller) AcknowledgeOrders(w http.ResponseWriter, r *http.Request) {
 	claims := actor(r)
-	branchID, err := service.ResolveBranchScope(claims, nil)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
 
 	var req struct {
 		OrderIDs []uuid.UUID `json:"order_ids"`
+		BranchID *uuid.UUID  `json:"branch_id"`
 	}
 	if r.ContentLength > 0 {
 		if err := decode(w, r, &req); err != nil {
 			writeError(w, err)
 			return
 		}
+	}
+
+	// An owner must pass branch_id to scope this to the outlet they are
+	// currently viewing — otherwise "mark as read" silently acknowledges every
+	// outlet's backlog at once, which the admin portal used to do.
+	branchID, err := service.ResolveBranchScope(claims, req.BranchID)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
 
 	count, err := c.svc.AcknowledgeOrders(r.Context(), branchID, req.OrderIDs, claims.UserID)
