@@ -124,12 +124,23 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 		return nil, err
 	}
 
+	settingsMap, err := s.repo.ListSettingsByBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	quotes := make([]dto.BranchDeliveryQuote, 0, len(branches))
 	nearestIdx := -1
 
 	for _, b := range branches {
-		set := s.settingsFor(ctx, b.ID)
+		setVal, ok := settingsMap[b.ID]
+		var set *model.BranchSettings
+		if ok {
+			set = &setVal
+		} else {
+			set = defaultSettings(b.ID)
+		}
 		distance := RoadDistanceKm(req.Lat, req.Lon, b.Latitude, b.Longitude)
 		fee := DeliveryFee(set, distance, req.Subtotal, orderType)
 
