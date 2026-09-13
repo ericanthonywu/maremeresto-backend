@@ -175,6 +175,78 @@ func TestOperatingHoursCrossingMidnight(t *testing.T) {
 	}
 }
 
+func TestFormatOperatingHours(t *testing.T) {
+	schedule := map[string]any{
+		"weekday": map[string]any{"open": "08:00", "close": "22:00"},
+		"weekend": map[string]any{"open": "09:00", "close": "21:00"},
+		"monday":  map[string]any{"open": "11:00", "close": "15:00"},
+	}
+
+	at := func(day int, hour, min int) time.Time {
+		// 2026-09-07 is a Monday (day=1). 2026-09-06 is Sunday (day=0). 2026-09-08 is Tuesday (day=2).
+		return time.Date(2026, 9, 6+day, hour, min, 0, 0, OutletLocation)
+	}
+
+	cases := []struct {
+		name     string
+		schedule map[string]any
+		when     time.Time
+		want     string
+	}{
+		{
+			name:     "monday override schedule",
+			schedule: schedule,
+			when:     at(1, 10, 0),
+			want:     "11.00–15.00",
+		},
+		{
+			name:     "tuesday standard weekday schedule",
+			schedule: schedule,
+			when:     at(2, 10, 0),
+			want:     "08.00–22.00",
+		},
+		{
+			name:     "sunday weekend schedule",
+			schedule: schedule,
+			when:     at(0, 10, 0),
+			want:     "09.00–21.00",
+		},
+		{
+			name:     "nil schedule returns empty string",
+			schedule: nil,
+			when:     at(1, 10, 0),
+			want:     "",
+		},
+		{
+			name:     "empty schedule returns empty string",
+			schedule: map[string]any{},
+			when:     at(1, 10, 0),
+			want:     "",
+		},
+		{
+			name:     "missing fields returns empty string",
+			schedule: map[string]any{"weekday": map[string]any{"open": "08:00"}},
+			when:     at(2, 10, 0),
+			want:     "",
+		},
+		{
+			name:     "timezone aware conversion",
+			schedule: schedule,
+			// 2026-09-06 23:00 UTC is 2026-09-07 06:00 WIB (Monday). Should use Monday override.
+			when: time.Date(2026, 9, 6, 23, 0, 0, 0, time.UTC),
+			want: "11.00–15.00",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FormatOperatingHours(tc.schedule, tc.when); got != tc.want {
+				t.Errorf("FormatOperatingHours() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // A malformed or missing schedule must not lock an outlet out of trading.
 func TestOperatingHoursFailOpen(t *testing.T) {
 	now := time.Now()
