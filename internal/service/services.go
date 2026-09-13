@@ -668,16 +668,9 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 
 	// 1. Branch must exist, be switched on, and be inside its trading hours.
-	branch, err := s.repo.FindBranchByID(ctx, req.BranchID)
+	branch, settings, err := s.validateBranchForOrder(ctx, req.BranchID)
 	if err != nil {
 		return nil, err
-	}
-	if branch == nil {
-		return nil, apperror.ErrNotFound
-	}
-	settings := s.settingsFor(ctx, branch.ID)
-	if !branch.IsOpen || !IsWithinOperatingHours(settings.OperatingHours, time.Now()) {
-		return nil, apperror.ErrStoreClosed
 	}
 
 	normPhone, err := dto.NormalizeIndonesianPhone(req.CustomerPhone)
@@ -685,27 +678,67 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 		return nil, err
 	}
 
-	// 2. Price the basket from the database, never from the client. Each item
-	//    must belong to this branch, so a menu id copied from another outlet
-	//    cannot be ordered at its neighbour's price.
-	ids := make([]uuid.UUID, 0, len(req.Items))
-	for _, it := range req.Items {
-		ids = append(ids, it.MenuItemID)
-	}
-	menuItems, err := s.repo.FindMenuItemsByIDs(ctx, ids)
+	// 2. Price the basket from the database, never from the client.
+	orderItems, subtotal, err := s.processOrderItems(ctx, branch, settings, req.Items)
 	if err != nil {
 		return nil, err
 	}
 
+	// 3. Distance and delivery fee come from the same helpers the quote endpoint uses.
+	distanceKm, deliveryFee, err := calculateOrderDelivery(settings, branch, req.OrderType, req.DeliveryLat, req.DeliveryLon, req.DeliveryAddress, subtotal)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Promo validity, expiry and redemption cap are all enforced here.
+	discount, promoCode, err := s.applyOrderPromo(ctx, req.PromoCode, subtotal, deliveryFee)
+	if err != nil {
+		return nil, err
+	}
+
+	grandTotal := subtotal + deliveryFee + settings.ServiceFee - discount
+	if grandTotal < 0 {
+		grandTotal = 0
+	}
+
+	// 5. Persist atomically.
+	return s.persistOrder(ctx, userID, branch, settings, req, normPhone, orderItems, subtotal, deliveryFee, discount, grandTotal, distanceKm, promoCode)
+}
+
+func (s *Service) validateBranchForOrder(ctx context.Context, branchID uuid.UUID) (*model.Branch, *model.BranchSettings, error) {
+	branch, err := s.repo.FindBranchByID(ctx, branchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if branch == nil {
+		return nil, nil, apperror.ErrNotFound
+	}
+	settings := s.settingsFor(ctx, branch.ID)
+	if !branch.IsOpen || !IsWithinOperatingHours(settings.OperatingHours, time.Now()) {
+		return nil, nil, apperror.ErrStoreClosed
+	}
+	return branch, settings, nil
+}
+
+func (s *Service) processOrderItems(ctx context.Context, branch *model.Branch, settings *model.BranchSettings, items []dto.CreateOrderItemRequest) ([]model.OrderItem, int, error) {
+	ids := make([]uuid.UUID, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.MenuItemID)
+	}
+	menuItems, err := s.repo.FindMenuItemsByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	subtotal := 0
-	orderItems := make([]model.OrderItem, 0, len(req.Items))
-	for _, itReq := range req.Items {
+	orderItems := make([]model.OrderItem, 0, len(items))
+	for _, itReq := range items {
 		mItem, ok := menuItems[itReq.MenuItemID]
 		if !ok || !mItem.IsAvailable {
-			return nil, apperror.Invalid("menu yang dipilih sedang tidak tersedia, silakan muat ulang keranjang")
+			return nil, 0, apperror.Invalid("menu yang dipilih sedang tidak tersedia, silakan muat ulang keranjang")
 		}
 		if mItem.BranchID != branch.ID {
-			return nil, apperror.Invalid(fmt.Sprintf("%q tidak tersedia di outlet %s", mItem.Name, branch.Name))
+			return nil, 0, apperror.Invalid(fmt.Sprintf("%q tidak tersedia di outlet %s", mItem.Name, branch.Name))
 		}
 
 		lineTotal := mItem.Price * itReq.Quantity
@@ -725,41 +758,44 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 
 	if settings.MinOrderAmount > 0 && subtotal < settings.MinOrderAmount {
-		return nil, fmt.Errorf("%w (minimum Rp %s)", apperror.ErrBelowMinimumOrder, formatRupiah(settings.MinOrderAmount))
+		return nil, 0, fmt.Errorf("%w (minimum Rp %s)", apperror.ErrBelowMinimumOrder, formatRupiah(settings.MinOrderAmount))
 	}
 
-	// 3. Distance and delivery fee come from the same helpers the quote
-	//    endpoint uses, so the customer is charged exactly what they were shown.
-	isDelivery := req.OrderType == "delivery" || req.OrderType == "scheduled"
+	return orderItems, subtotal, nil
+}
+
+func calculateOrderDelivery(settings *model.BranchSettings, branch *model.Branch, orderType string, deliveryLat, deliveryLon *float64, deliveryAddress string, subtotal int) (float64, int, error) {
+	isDelivery := orderType == "delivery" || orderType == "scheduled"
 	distanceKm := 0.0
 
 	if isDelivery {
-		if req.DeliveryLat == nil || req.DeliveryLon == nil || (*req.DeliveryLat == 0 && *req.DeliveryLon == 0) {
-			return nil, apperror.ErrLocationRequired
+		if deliveryLat == nil || deliveryLon == nil || (*deliveryLat == 0 && *deliveryLon == 0) {
+			return 0, 0, apperror.ErrLocationRequired
 		}
-		if strings.TrimSpace(req.DeliveryAddress) == "" {
-			return nil, apperror.Invalid("alamat pengantaran wajib diisi")
+		if strings.TrimSpace(deliveryAddress) == "" {
+			return 0, 0, apperror.Invalid("alamat pengantaran wajib diisi")
 		}
-		distanceKm = RoadDistanceKm(*req.DeliveryLat, *req.DeliveryLon, branch.Latitude, branch.Longitude)
+		distanceKm = RoadDistanceKm(*deliveryLat, *deliveryLon, branch.Latitude, branch.Longitude)
 		if distanceKm > maxServiceableKm {
-			return nil, fmt.Errorf("%w (jarak %.1f km, maksimal %d km)",
+			return 0, 0, fmt.Errorf("%w (jarak %.1f km, maksimal %d km)",
 				apperror.ErrOutOfDeliveryRange, distanceKm, int(maxServiceableKm))
 		}
 	}
 
-	deliveryFee := DeliveryFee(settings, distanceKm, subtotal, req.OrderType)
+	deliveryFee := DeliveryFee(settings, distanceKm, subtotal, orderType)
+	return distanceKm, deliveryFee, nil
+}
 
-	// 4. Promo validity, expiry and redemption cap are all enforced here; the
-	//    client-side discount is never trusted.
+func (s *Service) applyOrderPromo(ctx context.Context, rawCode string, subtotal, deliveryFee int) (int, string, error) {
 	discount := 0
-	promoCode := strings.ToUpper(strings.TrimSpace(req.PromoCode))
+	promoCode := strings.ToUpper(strings.TrimSpace(rawCode))
 	if promoCode != "" {
 		promo, err := s.repo.FindPromoByCode(ctx, promoCode)
 		if err != nil {
-			return nil, err
+			return 0, "", err
 		}
 		if promo == nil || !promo.Redeemable(time.Now()) || subtotal < promo.MinSpend {
-			return nil, apperror.ErrInvalidPromo
+			return 0, "", apperror.ErrInvalidPromo
 		}
 		switch promo.Type {
 		case "fixed":
@@ -771,13 +807,10 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 			discount = subtotal + deliveryFee
 		}
 	}
+	return discount, promoCode, nil
+}
 
-	grandTotal := subtotal + deliveryFee + settings.ServiceFee - discount
-	if grandTotal < 0 {
-		grandTotal = 0
-	}
-
-	// 5. Persist atomically.
+func (s *Service) persistOrder(ctx context.Context, userID *uuid.UUID, branch *model.Branch, settings *model.BranchSettings, req *dto.CreateOrderRequest, normPhone string, orderItems []model.OrderItem, subtotal, deliveryFee, discount, grandTotal int, distanceKm float64, promoCode string) (*model.Order, error) {
 	tx, err := s.repo.DB().Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -831,9 +864,6 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 
 	order.Branch = branch
-
-	// Do not notify admin rooms yet — the order enters the admin system with
-	// notifications only after the customer completes payment.
 	return order, nil
 }
 
