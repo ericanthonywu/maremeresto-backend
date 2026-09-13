@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
@@ -339,15 +342,24 @@ func Logger(next http.Handler) http.Handler {
 	})
 }
 
-func Recovery(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				tid := traceID(r)
-				slog.Error("PANIC recovered", "trace_id", tid, "error", rec, "path", r.URL.Path)
-				writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+func Recovery(alertSvc *alert.AlertService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					tid := traceID(r)
+					stack := string(debug.Stack())
+					errMsg := fmt.Sprintf("%v", rec)
+					slog.Error("PANIC recovered", "trace_id", tid, "error", rec, "path", r.URL.Path)
+
+					if alertSvc != nil {
+						alertSvc.SendErrorAlert(tid, errMsg, r.URL.Path, stack)
+					}
+
+					writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/controller"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/database"
@@ -54,10 +55,11 @@ func main() {
 
 	// 4. Initialize Dependency Layers (Separation of Concern)
 	// Repository -> Service -> Controller -> Router
+	alertSvc := alert.NewAlertService(cfg)
 	repo := repository.NewRepository(dbPool)
 	svc := service.NewService(repo, cfg, hub)
 	ctrl := controller.NewController(svc, hub, cfg)
-	r := router.NewRouter(cfg, ctrl)
+	r := router.NewRouter(cfg, ctrl, alertSvc)
 
 	// 5. HTTP Server setup with graceful shutdown
 	server := &http.Server{
