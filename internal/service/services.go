@@ -591,30 +591,19 @@ func (s *Service) loadWritableMenuItem(ctx context.Context, actor *middleware.JW
 
 // resolveWritableBranch returns the branch the caller is allowed to write to.
 func resolveWritableBranch(actor *middleware.JWTClaims, requested uuid.UUID) (uuid.UUID, error) {
-	if actor == nil {
-		return uuid.Nil, apperror.ErrUnauthorized
+	var reqPtr *uuid.UUID
+	if requested != uuid.Nil {
+		reqPtr = &requested
 	}
 
-	switch actor.Role {
-	case "owner":
-		if requested == uuid.Nil {
-			return uuid.Nil, apperror.Invalid("outlet wajib dipilih")
-		}
-		return requested, nil
-
-	case "branch_admin":
-		if actor.BranchID == nil {
-			return uuid.Nil, apperror.ErrForbidden
-		}
-		// A branch admin's own outlet always wins over whatever the client sent.
-		if requested != uuid.Nil && requested != *actor.BranchID {
-			return uuid.Nil, apperror.ErrForbidden
-		}
-		return *actor.BranchID, nil
-
-	default:
-		return uuid.Nil, apperror.ErrForbidden
+	scoped, err := ResolveBranchScope(actor, reqPtr)
+	if err != nil {
+		return uuid.Nil, err
 	}
+	if scoped == nil {
+		return uuid.Nil, apperror.Invalid("outlet wajib dipilih")
+	}
+	return *scoped, nil
 }
 
 func (s *Service) assertBranchAndCategoryExist(ctx context.Context, branchID, categoryID uuid.UUID) error {
@@ -1560,7 +1549,12 @@ func ResolveBranchScope(actor *middleware.JWTClaims, requested *uuid.UUID) (*uui
 		return nil, apperror.ErrUnauthorized
 	}
 
-	if actor.Role == "branch_admin" {
+	switch actor.Role {
+	case "owner":
+		// Owner: nil means "the whole network".
+		return requested, nil
+
+	case "branch_admin":
 		if actor.BranchID == nil {
 			return nil, apperror.ErrForbidden
 		}
@@ -1568,10 +1562,10 @@ func ResolveBranchScope(actor *middleware.JWTClaims, requested *uuid.UUID) (*uui
 			return nil, apperror.ErrForbidden
 		}
 		return actor.BranchID, nil
-	}
 
-	// Owner: nil means "the whole network".
-	return requested, nil
+	default:
+		return nil, apperror.ErrForbidden
+	}
 }
 
 func (s *Service) GetBranchSettings(ctx context.Context, branchID uuid.UUID) (*model.BranchSettings, error) {
