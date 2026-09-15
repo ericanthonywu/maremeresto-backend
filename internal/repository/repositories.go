@@ -442,32 +442,147 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 	return &o, nil
 }
 
+func (r *Repository) EnsureFeedbackSchema(ctx context.Context) {
+	_, _ = r.db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS order_feedback (
+			order_id UUID PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+			rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+			resto_rating SMALLINT CHECK (resto_rating IS NULL OR (resto_rating BETWEEN 1 AND 5)),
+			app_rating SMALLINT CHECK (app_rating IS NULL OR (app_rating BETWEEN 1 AND 5)),
+			resto_reason TEXT,
+			app_reason TEXT,
+			comment TEXT,
+			items_feedback JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+		ALTER TABLE order_feedback
+			ADD COLUMN IF NOT EXISTS resto_rating SMALLINT CHECK (resto_rating IS NULL OR (resto_rating BETWEEN 1 AND 5)),
+			ADD COLUMN IF NOT EXISTS app_rating SMALLINT CHECK (app_rating IS NULL OR (app_rating BETWEEN 1 AND 5)),
+			ADD COLUMN IF NOT EXISTS resto_reason TEXT,
+			ADD COLUMN IF NOT EXISTS app_reason TEXT,
+			ADD COLUMN IF NOT EXISTS items_feedback JSONB NOT NULL DEFAULT '[]'::jsonb;
+		ALTER TABLE order_items
+			ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating IS NULL OR (rating BETWEEN 1 AND 5)),
+			ADD COLUMN IF NOT EXISTS review_reason TEXT;
+	`)
+}
+
 func (r *Repository) FindOrderFeedback(ctx context.Context, orderID uuid.UUID) (*model.OrderFeedback, error) {
-	query := `SELECT rating, comment, created_at, updated_at FROM order_feedback WHERE order_id = $1`
+	query := `
+		SELECT rating, resto_rating, app_rating, resto_reason, app_reason, comment,
+		       COALESCE(items_feedback, '[]'::jsonb), created_at, updated_at
+		FROM order_feedback
+		WHERE order_id = $1
+	`
 	var feedback model.OrderFeedback
-	err := r.db.QueryRow(ctx, query, orderID).Scan(&feedback.Rating, &feedback.Comment, &feedback.CreatedAt, &feedback.UpdatedAt)
+	var itemsFeedbackRaw []byte
+	err := r.db.QueryRow(ctx, query, orderID).Scan(
+		&feedback.Rating,
+		&feedback.RestoRating,
+		&feedback.AppRating,
+		&feedback.RestoReason,
+		&feedback.AppReason,
+		&feedback.Comment,
+		&itemsFeedbackRaw,
+		&feedback.CreatedAt,
+		&feedback.UpdatedAt,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if len(itemsFeedbackRaw) > 0 {
+		_ = json.Unmarshal(itemsFeedbackRaw, &feedback.ItemsFeedback)
+	}
+	if feedback.ItemsFeedback == nil {
+		feedback.ItemsFeedback = []model.OrderItemFeedback{}
+	}
 	return &feedback, nil
 }
 
-func (r *Repository) UpsertOrderFeedback(ctx context.Context, orderID uuid.UUID, rating int, comment string) (*model.OrderFeedback, error) {
+func (r *Repository) UpsertOrderFeedback(
+	ctx context.Context,
+	orderID uuid.UUID,
+	rating int,
+	restoRating *int,
+	appRating *int,
+	restoReason string,
+	appReason string,
+	comment string,
+	itemsFeedback []model.OrderItemFeedback,
+) (*model.OrderFeedback, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	itemsJSON, err := json.Marshal(itemsFeedback)
+	if err != nil {
+		itemsJSON = []byte("[]")
+	}
+
 	query := `
-		INSERT INTO order_feedback (order_id, rating, comment)
-		VALUES ($1, $2, NULLIF($3, ''))
+		INSERT INTO order_feedback (
+			order_id, rating, resto_rating, app_rating, resto_reason, app_reason, comment, items_feedback
+		)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8)
 		ON CONFLICT (order_id) DO UPDATE
-		SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, updated_at = NOW()
-		RETURNING rating, comment, created_at, updated_at
+		SET rating = EXCLUDED.rating,
+		    resto_rating = EXCLUDED.resto_rating,
+		    app_rating = EXCLUDED.app_rating,
+		    resto_reason = EXCLUDED.resto_reason,
+		    app_reason = EXCLUDED.app_reason,
+		    comment = EXCLUDED.comment,
+		    items_feedback = EXCLUDED.items_feedback,
+		    updated_at = NOW()
+		RETURNING rating, resto_rating, app_rating, resto_reason, app_reason, comment, items_feedback, created_at, updated_at
 	`
 	var feedback model.OrderFeedback
-	err := r.db.QueryRow(ctx, query, orderID, rating, comment).Scan(
-		&feedback.Rating, &feedback.Comment, &feedback.CreatedAt, &feedback.UpdatedAt,
+	var itemsFeedbackRaw []byte
+	err = tx.QueryRow(ctx, query,
+		orderID, rating, restoRating, appRating, restoReason, appReason, comment, itemsJSON,
+	).Scan(
+		&feedback.Rating,
+		&feedback.RestoRating,
+		&feedback.AppRating,
+		&feedback.RestoReason,
+		&feedback.AppReason,
+		&feedback.Comment,
+		&itemsFeedbackRaw,
+		&feedback.CreatedAt,
+		&feedback.UpdatedAt,
 	)
 	if err != nil {
+		return nil, err
+	}
+
+	if len(itemsFeedbackRaw) > 0 {
+		_ = json.Unmarshal(itemsFeedbackRaw, &feedback.ItemsFeedback)
+	}
+	if feedback.ItemsFeedback == nil {
+		feedback.ItemsFeedback = []model.OrderItemFeedback{}
+	}
+
+	// Also update individual order_items for reporting/analytics
+	for _, item := range itemsFeedback {
+		if item.OrderItemID != uuid.Nil && item.Rating >= 1 && item.Rating <= 5 {
+			var reasonStr *string
+			if item.Reason != nil && strings.TrimSpace(*item.Reason) != "" {
+				trimmed := strings.TrimSpace(*item.Reason)
+				reasonStr = &trimmed
+			}
+			_, _ = tx.Exec(ctx,
+				`UPDATE order_items SET rating = $1, review_reason = $2 WHERE id = $3 AND order_id = $4`,
+				item.Rating, reasonStr, item.OrderItemID, orderID,
+			)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &feedback, nil
@@ -487,7 +602,7 @@ func (r *Repository) FindOrderByOrderNumber(ctx context.Context, num string) (*m
 }
 
 func (r *Repository) ListOrderItems(ctx context.Context, orderID uuid.UUID) ([]model.OrderItem, error) {
-	query := `SELECT id, order_id, menu_item_id, item_name, item_price, item_icon, quantity, notes, line_total, created_at FROM order_items WHERE order_id = $1`
+	query := `SELECT id, order_id, menu_item_id, item_name, item_price, item_icon, quantity, notes, line_total, rating, review_reason, created_at FROM order_items WHERE order_id = $1`
 	rows, err := r.db.Query(ctx, query, orderID)
 	if err != nil {
 		return nil, err
@@ -499,7 +614,7 @@ func (r *Repository) ListOrderItems(ctx context.Context, orderID uuid.UUID) ([]m
 		var it model.OrderItem
 		if err := rows.Scan(
 			&it.ID, &it.OrderID, &it.MenuItemID, &it.ItemName, &it.ItemPrice, &it.ItemIcon,
-			&it.Quantity, &it.Notes, &it.LineTotal, &it.CreatedAt,
+			&it.Quantity, &it.Notes, &it.LineTotal, &it.Rating, &it.ReviewReason, &it.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

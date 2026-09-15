@@ -123,27 +123,42 @@ type Order struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
+type OrderItemFeedback struct {
+	OrderItemID uuid.UUID  `json:"order_item_id"`
+	MenuItemID  *uuid.UUID `json:"menu_item_id,omitempty"`
+	ItemName    string     `json:"item_name"`
+	Rating      int        `json:"rating"`
+	Reason      *string    `json:"reason,omitempty"`
+}
+
 // OrderFeedback is submitted by the customer after a completed order. It is
 // intentionally separate from a public branch rating: staff can use it to
 // improve service without exposing an unmoderated review feed.
 type OrderFeedback struct {
-	Rating    int       `json:"rating"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Rating        int                 `json:"rating"`
+	RestoRating   *int                `json:"resto_rating,omitempty"`
+	AppRating     *int                `json:"app_rating,omitempty"`
+	RestoReason   *string             `json:"resto_reason,omitempty"`
+	AppReason     *string             `json:"app_reason,omitempty"`
+	Comment       *string             `json:"comment,omitempty"`
+	ItemsFeedback []OrderItemFeedback `json:"items_feedback,omitempty"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
 type OrderItem struct {
-	ID         uuid.UUID  `json:"id"`
-	OrderID    uuid.UUID  `json:"order_id"`
-	MenuItemID *uuid.UUID `json:"menu_item_id,omitempty"`
-	ItemName   string     `json:"item_name"`
-	ItemPrice  int        `json:"item_price"`
-	ItemIcon   string     `json:"item_icon"`
-	Quantity   int        `json:"quantity"`
-	Notes      *string    `json:"notes,omitempty"`
-	LineTotal  int        `json:"line_total"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID           uuid.UUID  `json:"id"`
+	OrderID      uuid.UUID  `json:"order_id"`
+	MenuItemID   *uuid.UUID `json:"menu_item_id,omitempty"`
+	ItemName     string     `json:"item_name"`
+	ItemPrice    int        `json:"item_price"`
+	ItemIcon     string     `json:"item_icon"`
+	Quantity     int        `json:"quantity"`
+	Notes        *string    `json:"notes,omitempty"`
+	LineTotal    int        `json:"line_total"`
+	Rating       *int       `json:"rating,omitempty"`
+	ReviewReason *string    `json:"review_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type Payment struct {

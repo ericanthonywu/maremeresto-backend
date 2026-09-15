@@ -932,7 +932,34 @@ func (s *Service) SubmitOrderFeedback(ctx context.Context, orderID uuid.UUID, re
 	if order.Status != "completed" {
 		return nil, apperror.Invalid("feedback dapat diberikan setelah pesanan selesai")
 	}
-	return s.repo.UpsertOrderFeedback(ctx, orderID, req.Rating, req.Comment)
+
+	var modelItems []model.OrderItemFeedback
+	for _, it := range req.ItemsFeedback {
+		var reasonPtr *string
+		trimmed := strings.TrimSpace(it.Reason)
+		if trimmed != "" {
+			reasonPtr = &trimmed
+		}
+		modelItems = append(modelItems, model.OrderItemFeedback{
+			OrderItemID: it.OrderItemID,
+			MenuItemID:  it.MenuItemID,
+			ItemName:    it.ItemName,
+			Rating:      it.Rating,
+			Reason:      reasonPtr,
+		})
+	}
+
+	return s.repo.UpsertOrderFeedback(
+		ctx,
+		orderID,
+		req.Rating,
+		req.RestoRating,
+		req.AppRating,
+		req.RestoReason,
+		req.AppReason,
+		req.Comment,
+		modelItems,
+	)
 }
 
 func isValidTransition(from, to string) bool {

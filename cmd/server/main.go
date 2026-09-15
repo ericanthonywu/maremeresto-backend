@@ -57,6 +57,7 @@ func main() {
 	// Repository -> Service -> Controller -> Router
 	alertSvc := alert.NewAlertService(cfg)
 	repo := repository.NewRepository(dbPool)
+	repo.EnsureFeedbackSchema(context.Background())
 	svc := service.NewService(repo, cfg, hub)
 	ctrl := controller.NewController(svc, hub, cfg)
 	r := router.NewRouter(cfg, ctrl, alertSvc)

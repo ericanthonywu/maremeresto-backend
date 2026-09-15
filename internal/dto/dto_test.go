@@ -252,3 +252,71 @@ func TestUpdateBranchProfileAllowsLandlinePhone(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderFeedbackRequestValidate(t *testing.T) {
+	restoRating := 5
+	appRating := 4
+	invalidRating := 6
+	zeroRating := 0
+
+	// 1. Legacy format with only Rating and Comment
+	legacy := OrderFeedbackRequest{
+		Rating:  5,
+		Comment: "Pelayanan sangat baik dan cepat",
+	}
+	if err := legacy.Validate(); err != nil {
+		t.Errorf("expected legacy feedback to be valid, got: %v", err)
+	}
+
+	// 2. Enhanced format with resto, app, and item ratings
+	enhanced := OrderFeedbackRequest{
+		RestoRating: &restoRating,
+		AppRating:   &appRating,
+		RestoReason: "Rasa sangat lezat dan pas",
+		AppReason:   "Aplikasi cepat dan responsif",
+		ItemsFeedback: []OrderItemFeedbackDTO{
+			{
+				OrderItemID: uuid.New(),
+				ItemName:    "Nasi Goreng Spesial",
+				Rating:      5,
+				Reason:      "Bumbu pas & porsi banyak",
+			},
+		},
+	}
+	if err := enhanced.Validate(); err != nil {
+		t.Errorf("expected enhanced feedback to be valid, got: %v", err)
+	}
+	if enhanced.Rating != 5 {
+		t.Errorf("expected derived overall rating to be 5, got: %d", enhanced.Rating)
+	}
+
+	// 3. Invalid rating out of range
+	invalid := OrderFeedbackRequest{
+		RestoRating: &invalidRating,
+	}
+	if err := invalid.Validate(); err == nil {
+		t.Error("expected error for RestoRating > 5, got nil")
+	}
+
+	// 4. Invalid item rating out of range
+	invalidItem := OrderFeedbackRequest{
+		Rating: 5,
+		ItemsFeedback: []OrderItemFeedbackDTO{
+			{
+				OrderItemID: uuid.New(),
+				ItemName:    "Es Teh Manis",
+				Rating:      zeroRating,
+			},
+		},
+	}
+	if err := invalidItem.Validate(); err == nil {
+		t.Error("expected error for item rating 0, got nil")
+	}
+
+	// 5. No rating provided at all
+	empty := OrderFeedbackRequest{}
+	if err := empty.Validate(); err == nil {
+		t.Error("expected error for completely empty feedback, got nil")
+	}
+}
+

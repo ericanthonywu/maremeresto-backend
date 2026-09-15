@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -194,19 +195,88 @@ type UpdateOrderStatusRequest struct {
 	ExpectedVersion int    `json:"expected_version"`
 }
 
+type OrderItemFeedbackDTO struct {
+	OrderItemID uuid.UUID  `json:"order_item_id"`
+	MenuItemID  *uuid.UUID `json:"menu_item_id,omitempty"`
+	ItemName    string     `json:"item_name"`
+	Rating      int        `json:"rating"`
+	Reason      string     `json:"reason"`
+}
+
 type OrderFeedbackRequest struct {
-	Rating  int    `json:"rating"`
-	Comment string `json:"comment"`
+	Rating        int                    `json:"rating"`
+	RestoRating   *int                   `json:"resto_rating,omitempty"`
+	AppRating     *int                   `json:"app_rating,omitempty"`
+	RestoReason   string                 `json:"resto_reason,omitempty"`
+	AppReason     string                 `json:"app_reason,omitempty"`
+	Comment       string                 `json:"comment,omitempty"`
+	ItemsFeedback []OrderItemFeedbackDTO `json:"items_feedback,omitempty"`
 }
 
 func (r *OrderFeedbackRequest) Validate() error {
-	if r.Rating < 1 || r.Rating > 5 {
-		return apperror.Invalid("rating harus antara 1 dan 5")
-	}
+	r.RestoReason = strings.TrimSpace(r.RestoReason)
+	r.AppReason = strings.TrimSpace(r.AppReason)
 	r.Comment = strings.TrimSpace(r.Comment)
+
+	if len(r.RestoReason) > 500 {
+		return apperror.Invalid("alasan resto maksimal 500 karakter")
+	}
+	if len(r.AppReason) > 500 {
+		return apperror.Invalid("alasan aplikasi maksimal 500 karakter")
+	}
 	if len(r.Comment) > 500 {
 		return apperror.Invalid("ulasan maksimal 500 karakter")
 	}
+
+	if r.RestoRating != nil && (*r.RestoRating < 1 || *r.RestoRating > 5) {
+		return apperror.Invalid("rating resto harus antara 1 dan 5")
+	}
+	if r.AppRating != nil && (*r.AppRating < 1 || *r.AppRating > 5) {
+		return apperror.Invalid("rating aplikasi harus antara 1 dan 5")
+	}
+
+	for _, it := range r.ItemsFeedback {
+		if it.Rating < 1 || it.Rating > 5 {
+			name := it.ItemName
+			if name == "" {
+				name = "menu"
+			}
+			return apperror.Invalid(fmt.Sprintf("rating untuk %s harus antara 1 dan 5", name))
+		}
+		if len(strings.TrimSpace(it.Reason)) > 500 {
+			name := it.ItemName
+			if name == "" {
+				name = "menu"
+			}
+			return apperror.Invalid(fmt.Sprintf("alasan untuk %s maksimal 500 karakter", name))
+		}
+	}
+
+	// If overall Rating is not explicitly set between 1 and 5, derive it intelligently
+	if r.Rating < 1 || r.Rating > 5 {
+		if r.RestoRating != nil && *r.RestoRating >= 1 && *r.RestoRating <= 5 {
+			r.Rating = *r.RestoRating
+		} else if r.AppRating != nil && *r.AppRating >= 1 && *r.AppRating <= 5 {
+			r.Rating = *r.AppRating
+		} else if len(r.ItemsFeedback) > 0 {
+			total := 0
+			count := 0
+			for _, it := range r.ItemsFeedback {
+				if it.Rating >= 1 && it.Rating <= 5 {
+					total += it.Rating
+					count++
+				}
+			}
+			if count > 0 {
+				r.Rating = (total + count/2) / count
+			}
+		}
+	}
+
+	if r.Rating < 1 || r.Rating > 5 {
+		return apperror.Invalid("pilih rating minimal salah satu (resto, aplikasi, atau menu)")
+	}
+
 	return nil
 }
 
