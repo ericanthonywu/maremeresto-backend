@@ -1206,6 +1206,45 @@ func (s *Service) GetPaymentForOrder(ctx context.Context, orderID uuid.UUID) (*m
 	return p, nil
 }
 
+// verifyMidtransSignature verifies the SHA512 signature key sent by Midtrans.
+// SHA512(order_id + status_code + gross_amount + server_key).
+func verifyMidtransSignature(orderID, statusCode, grossAmount, signatureKey, serverKey string) bool {
+	expected := sha512.Sum512([]byte(orderID + statusCode + grossAmount + serverKey))
+	return subtle.ConstantTimeCompare([]byte(strings.ToLower(signatureKey)), []byte(hex.EncodeToString(expected[:]))) == 1
+}
+
+// determinePaymentStatus maps Midtrans transaction and fraud statuses to internal payment status and paidAt timestamp.
+func determinePaymentStatus(txStatus, fraudStatus string, now time.Time) (string, *time.Time) {
+	var paidAt *time.Time
+	var newPaymentStatus string
+
+	switch txStatus {
+	case "capture":
+		// A captured card transaction is only money in the bank once fraud
+		// review has accepted it.
+		if fraudStatus == "deny" || fraudStatus == "challenge" {
+			newPaymentStatus = "pending"
+		} else {
+			newPaymentStatus = "settlement"
+			paidAt = &now
+		}
+	case "settlement":
+		newPaymentStatus = "settlement"
+		paidAt = &now
+	case "expire":
+		newPaymentStatus = "expire"
+	case "cancel", "deny", "failure":
+		newPaymentStatus = "cancel"
+	case "pending":
+		newPaymentStatus = "pending"
+	default:
+		slog.Warn("unhandled midtrans transaction_status", "status", txStatus)
+		newPaymentStatus = "pending"
+	}
+
+	return newPaymentStatus, paidAt
+}
+
 func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]any) error {
 	orderID, _ := payload["order_id"].(string)
 	statusCode, _ := payload["status_code"].(string)
@@ -1219,11 +1258,7 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 		return apperror.Invalid("order_id kosong pada notifikasi")
 	}
 
-	// SHA512(order_id + status_code + gross_amount + server_key). This is the
-	// only thing standing between the endpoint and anyone who can POST to it,
-	// so it is verified in every environment, not just production.
-	expected := sha512.Sum512([]byte(orderID + statusCode + grossAmount + s.cfg.MidtransServerKey))
-	if subtle.ConstantTimeCompare([]byte(strings.ToLower(signatureKey)), []byte(hex.EncodeToString(expected[:]))) != 1 {
+	if !verifyMidtransSignature(orderID, statusCode, grossAmount, signatureKey, s.cfg.MidtransServerKey) {
 		slog.Warn("rejected midtrans notification with bad signature", "order_id", orderID)
 		return apperror.ErrUnauthorized
 	}
@@ -1270,33 +1305,7 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 		}
 	}
 
-	now := time.Now()
-	var paidAt *time.Time
-	var newPaymentStatus string
-
-	switch txStatus {
-	case "capture":
-		// A captured card transaction is only money in the bank once fraud
-		// review has accepted it.
-		if fraudStatus == "deny" || fraudStatus == "challenge" {
-			newPaymentStatus = "pending"
-		} else {
-			newPaymentStatus = "settlement"
-			paidAt = &now
-		}
-	case "settlement":
-		newPaymentStatus = "settlement"
-		paidAt = &now
-	case "expire":
-		newPaymentStatus = "expire"
-	case "cancel", "deny", "failure":
-		newPaymentStatus = "cancel"
-	case "pending":
-		newPaymentStatus = "pending"
-	default:
-		slog.Warn("unhandled midtrans transaction_status", "status", txStatus, "order_id", orderID)
-		newPaymentStatus = "pending"
-	}
+	newPaymentStatus, paidAt := determinePaymentStatus(txStatus, fraudStatus, time.Now())
 
 	tx, err := s.repo.DB().Begin(ctx)
 	if err != nil {
