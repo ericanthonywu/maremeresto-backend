@@ -107,10 +107,19 @@ func (s *Service) settingsFor(ctx context.Context, branchID uuid.UUID) *model.Br
 // customer app renders these numbers directly, so no arithmetic is duplicated
 // on the client.
 func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteRequest) (*dto.DeliveryQuoteResponse, error) {
-	if req.Lat == 0 && req.Lon == 0 {
+	lat := req.Lat
+	lon := req.Lon
+	if req.DeliveryLat != nil {
+		lat = *req.DeliveryLat
+	}
+	if req.DeliveryLon != nil {
+		lon = *req.DeliveryLon
+	}
+
+	if lat == 0 && lon == 0 {
 		return nil, apperror.ErrLocationRequired
 	}
-	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
+	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return nil, apperror.Invalid("koordinat lokasi tidak valid")
 	}
 
@@ -130,7 +139,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 
 	for _, b := range branches {
 		set := s.settingsFor(ctx, b.ID)
-		distance := RoadDistanceKm(req.Lat, req.Lon, b.Latitude, b.Longitude)
+		distance := RoadDistanceKm(lat, lon, b.Latitude, b.Longitude)
 		fee := DeliveryFee(set, distance, req.Subtotal, orderType)
 
 		serviceable := distance <= maxServiceableKm

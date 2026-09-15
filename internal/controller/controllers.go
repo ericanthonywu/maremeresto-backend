@@ -165,6 +165,7 @@ func (c *Controller) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 	// the client has no use for.
 	ok(w, dto.UserSummary{
 		ID:       claims.UserID,
+		Name:     claims.Name,
 		Phone:    claims.Phone,
 		Role:     claims.Role,
 		BranchID: claims.BranchID,

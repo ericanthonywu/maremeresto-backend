@@ -161,7 +161,7 @@ func (s *Service) CustomerLogin(ctx context.Context, rawPhone, name string) (*dt
 	// Checkout submits the current required name. Keep an existing account in
 	// sync without making the customer visit a separate profile screen first.
 	if user.Name != name {
-		updated, updateErr := s.repo.UpdateCustomerProfile(ctx, user.ID, name, normalizedPhone)
+		updated, updateErr := s.repo.UpdateCustomerProfile(ctx, user.ID, name, normalizedPhone, nil, nil, nil)
 		if updateErr != nil {
 			return nil, updateErr
 		}
@@ -191,7 +191,7 @@ func (s *Service) UpdateCustomerProfile(ctx context.Context, userID uuid.UUID, r
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	user, err := s.repo.UpdateCustomerProfile(ctx, userID, req.Name, req.Phone)
+	user, err := s.repo.UpdateCustomerProfile(ctx, userID, req.Name, req.Phone, req.Address, req.Latitude, req.Longitude)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +273,7 @@ const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL1
 func (s *Service) issueToken(user *model.User, ttl time.Duration) (string, error) {
 	claims := middleware.JWTClaims{
 		UserID:   user.ID,
+		Name:     user.Name,
 		Phone:    user.Phone,
 		Role:     user.Role,
 		BranchID: user.BranchID,
