@@ -26,6 +26,12 @@ type Config struct {
 	AdminURL          string `mapstructure:"ADMIN_URL"`
 	GeocoderURL       string `mapstructure:"GEOCODER_URL"`
 	GeocoderEmail     string `mapstructure:"GEOCODER_EMAIL"`
+	SMTPHost          string `mapstructure:"SMTP_HOST"`
+	SMTPPort          string `mapstructure:"SMTP_PORT"`
+	SMTPUser          string `mapstructure:"SMTP_USER"`
+	SMTPPassword      string `mapstructure:"SMTP_PASSWORD"`
+	AlertFromEmail    string `mapstructure:"ALERT_FROM_EMAIL"`
+	AlertToEmail      string `mapstructure:"ALERT_TO_EMAIL"`
 }
 
 func (c *Config) IsProduction() bool {
@@ -48,6 +54,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("GEOCODER_URL", "https://nominatim.openstreetmap.org")
 	viper.SetDefault("GEOCODER_EMAIL", "")
 	viper.SetDefault("MIDTRANS_IS_PROD", false)
+	viper.SetDefault("SMTP_PORT", "587")
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -63,6 +70,8 @@ func Load() (*Config, error) {
 		"MIDTRANS_SERVER_KEY", "MIDTRANS_CLIENT_KEY", "MIDTRANS_IS_PROD",
 		"UPLOAD_DIR", "BASE_URL", "CUSTOMER_URL", "ADMIN_URL",
 		"GEOCODER_URL", "GEOCODER_EMAIL",
+		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
+		"ALERT_FROM_EMAIL", "ALERT_TO_EMAIL",
 	} {
 		if err := viper.BindEnv(key); err != nil {
 			return nil, err

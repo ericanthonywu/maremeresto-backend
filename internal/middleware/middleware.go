@@ -4,14 +4,18 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/cors"
@@ -304,15 +308,31 @@ func (s *statusRecorder) Flush() {
 // http.ResponseController.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
+func traceID(r *http.Request) string {
+	if reqID := chimw.GetReqID(r.Context()); reqID != "" {
+		return reqID
+	}
+	if reqID := r.Header.Get("X-Request-Id"); reqID != "" {
+		return reqID
+	}
+	if reqID := r.Header.Get("X-Trace-Id"); reqID != "" {
+		return reqID
+	}
+	return uuid.NewString()
+}
+
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		tid := traceID(r)
+		w.Header().Set("X-Trace-Id", tid)
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 		if rec.status == 0 {
 			rec.status = http.StatusOK
 		}
 		slog.Info("HTTP Request",
+			"trace_id", tid,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
@@ -322,14 +342,24 @@ func Logger(next http.Handler) http.Handler {
 	})
 }
 
-func Recovery(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				slog.Error("PANIC recovered", "error", rec, "path", r.URL.Path)
-				writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+func Recovery(alertSvc *alert.AlertService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					tid := traceID(r)
+					stack := string(debug.Stack())
+					errMsg := fmt.Sprintf("%v", rec)
+					slog.Error("PANIC recovered", "trace_id", tid, "error", rec, "path", r.URL.Path)
+
+					if alertSvc != nil {
+						alertSvc.SendErrorAlert(tid, errMsg, r.URL.Path, stack)
+					}
+
+					writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
 }

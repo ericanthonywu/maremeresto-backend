@@ -1041,6 +1041,14 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		return nil, err
 	}
 
+	// Re-check idempotency key after acquiring lock to handle concurrent races.
+	if existing, err := s.repo.FindPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+		if existing.OrderID != req.OrderID {
+			return nil, apperror.Conflict("Idempotency-Key sudah dipakai untuk pesanan lain")
+		}
+		return existing, nil
+	}
+
 	order, err := s.repo.FindOrderByID(ctx, req.OrderID)
 	if err != nil {
 		return nil, err
@@ -1303,15 +1311,20 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	// Move the order forward only on a real settlement, and only from pending,
 	// so a duplicate notification cannot rewind an order already being made.
 	advanced := false
-	if newPaymentStatus == "settlement" && order.Status == "pending" {
-		if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "accepted", "Pembayaran diterima", order.Version); err != nil {
-			// A concurrent staff action already advanced it; the payment
-			// record is what matters here.
-			if !errors.Is(err, apperror.ErrConcurrentModification) {
-				return err
+	if newPaymentStatus == "settlement" {
+		if order.Status == "pending" {
+			if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "accepted", "Pembayaran diterima", order.Version); err != nil {
+				// A concurrent staff action already advanced it; the payment
+				// record is what matters here.
+				if !errors.Is(err, apperror.ErrConcurrentModification) {
+					return err
+				}
+			} else {
+				advanced = true
 			}
-		} else {
-			advanced = true
+		} else if order.Status == "cancelled" || order.Status == "rejected" {
+			slog.Warn("settlement received for non-pending order",
+				"order_id", orderID, "order_status", order.Status)
 		}
 	}
 

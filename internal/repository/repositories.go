@@ -911,9 +911,22 @@ func (r *Repository) CountUnacknowledgedOrders(ctx context.Context, branchID *uu
 // IncrementPromoRedemption is called once an order that used a promo is
 // committed, so max_redemptions is actually enforced.
 func (r *Repository) IncrementPromoRedemption(ctx context.Context, tx pgx.Tx, code string) error {
-	_, err := tx.Exec(ctx,
-		`UPDATE promos SET redemption_count = redemption_count + 1 WHERE UPPER(code) = UPPER($1)`, code)
-	return err
+	cmd, err := tx.Exec(ctx, `
+		UPDATE promos
+		SET redemption_count = redemption_count + 1
+		WHERE UPPER(code) = UPPER($1)
+		  AND is_active = true
+		  AND (max_redemptions IS NULL OR redemption_count < max_redemptions)
+		  AND (valid_from IS NULL OR NOW() >= valid_from)
+		  AND (valid_until IS NULL OR NOW() <= valid_until)
+	`, code)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return apperror.ErrInvalidPromo
+	}
+	return nil
 }
 
 // FindMenuItemsByIDs loads several menu items at once for order validation,
