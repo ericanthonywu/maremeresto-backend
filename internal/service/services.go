@@ -14,7 +14,6 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
-	"io"
 	"log/slog"
 	"math"
 	"mime/multipart"
@@ -1652,17 +1651,7 @@ func (s *Service) UploadAndCompressImage(ctx context.Context, fileHeader *multip
 	// Decode image
 	img, _, err := image.Decode(src)
 	if err != nil {
-		// If decoding failed, fallback to direct copy
-		_, _ = src.Seek(0, io.SeekStart)
-		filename := fmt.Sprintf("%s%s", uuid.NewString(), filepath.Ext(fileHeader.Filename))
-		targetPath := filepath.Join(uploadDir, filename)
-		dst, createErr := os.Create(targetPath)
-		if createErr != nil {
-			return "", createErr
-		}
-		defer dst.Close()
-		_, _ = io.Copy(dst, src)
-		return "/uploads/" + filename, nil
+		return "", apperror.Invalid("format gambar tidak valid atau file rusak")
 	}
 
 	// Auto-resize max dimension 800px keeping aspect ratio
