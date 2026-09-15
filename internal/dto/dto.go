@@ -50,20 +50,37 @@ func (r *CustomerPhoneLoginRequest) Validate() error {
 }
 
 type UpdateCustomerProfileRequest struct {
-	Name  string `json:"name"`
-	Phone string `json:"phone"`
+	Name      string   `json:"name"`
+	Phone     string   `json:"phone"`
+	Address   *string  `json:"address,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
 
 func (r *UpdateCustomerProfileRequest) Validate() error {
 	r.Name = strings.TrimSpace(r.Name)
-	if len(r.Name) < 2 || len(r.Name) > 100 {
+	if r.Name != "" && (len(r.Name) < 2 || len(r.Name) > 100) {
 		return apperror.Invalid("nama pemesan harus 2-100 karakter")
 	}
-	normalized, err := NormalizeIndonesianPhone(r.Phone)
-	if err != nil {
-		return err
+	if r.Phone != "" {
+		normalized, err := NormalizeIndonesianPhone(r.Phone)
+		if err != nil {
+			return err
+		}
+		r.Phone = normalized
 	}
-	r.Phone = normalized
+	if r.Address != nil {
+		*r.Address = strings.TrimSpace(*r.Address)
+		if len(*r.Address) > 500 {
+			return apperror.Invalid("alamat maksimal 500 karakter")
+		}
+	}
+	if r.Latitude != nil && (*r.Latitude < -90 || *r.Latitude > 90) {
+		return apperror.Invalid("koordinat lokasi tidak valid")
+	}
+	if r.Longitude != nil && (*r.Longitude < -180 || *r.Longitude > 180) {
+		return apperror.Invalid("koordinat lokasi tidak valid")
+	}
 	return nil
 }
 
@@ -557,10 +574,13 @@ type CommonResponse struct {
 // ---------------------------------------------------------------------
 
 type DeliveryQuoteRequest struct {
-	Lat       float64 `json:"lat"`
-	Lon       float64 `json:"lon"`
-	Subtotal  int     `json:"subtotal"`
-	OrderType string  `json:"order_type"`
+	BranchID    *uuid.UUID `json:"branch_id,omitempty"`
+	Lat         float64    `json:"lat"`
+	Lon         float64    `json:"lon"`
+	DeliveryLat *float64   `json:"delivery_lat,omitempty"`
+	DeliveryLon *float64   `json:"delivery_lon,omitempty"`
+	Subtotal    int        `json:"subtotal"`
+	OrderType   string     `json:"order_type"`
 }
 
 type BranchDeliveryQuote struct {

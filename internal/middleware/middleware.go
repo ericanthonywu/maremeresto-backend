@@ -30,6 +30,7 @@ const (
 
 type JWTClaims struct {
 	UserID   uuid.UUID  `json:"user_id"`
+	Name     string     `json:"name,omitempty"`
 	Phone    string     `json:"phone"`
 	Role     string     `json:"role"`
 	BranchID *uuid.UUID `json:"branch_id,omitempty"`

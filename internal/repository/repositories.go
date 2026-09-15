@@ -93,15 +93,20 @@ func (r *Repository) CreateCustomer(ctx context.Context, phone, name string) (*m
 // UpdateCustomerProfile keeps the account identity used for subsequent orders
 // in sync with the customer's profile menu. The unique phone constraint is
 // deliberately left to PostgreSQL, which safely rejects a number in use.
-func (r *Repository) UpdateCustomerProfile(ctx context.Context, userID uuid.UUID, name, phone string) (*model.User, error) {
+func (r *Repository) UpdateCustomerProfile(ctx context.Context, userID uuid.UUID, name, phone string, address *string, lat, lon *float64) (*model.User, error) {
 	query := `
 		UPDATE users
-		SET name = $1, phone = $2, updated_at = NOW()
-		WHERE id = $3 AND role = 'customer'
+		SET name = COALESCE(NULLIF($1, ''), name),
+		    phone = COALESCE(NULLIF($2, ''), phone),
+		    address = COALESCE($3, address),
+		    latitude = COALESCE($4, latitude),
+		    longitude = COALESCE($5, longitude),
+		    updated_at = NOW()
+		WHERE id = $6 AND role = 'customer'
 		RETURNING id, phone, name, role, branch_id, address, latitude, longitude, created_at, updated_at
 	`
 	var u model.User
-	err := r.db.QueryRow(ctx, query, name, phone, userID).Scan(
+	err := r.db.QueryRow(ctx, query, name, phone, address, lat, lon, userID).Scan(
 		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
