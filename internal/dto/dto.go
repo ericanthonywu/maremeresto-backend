@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/model"
 	"github.com/google/uuid"
 )
 
@@ -278,6 +279,71 @@ func (r *OrderFeedbackRequest) Validate() error {
 	}
 
 	return nil
+}
+
+type RatingCount struct {
+	Rating     int     `json:"rating"`
+	Count      int     `json:"count"`
+	Percentage float64 `json:"percentage"`
+}
+
+type BranchRatingSummary struct {
+	BranchID         uuid.UUID `json:"branch_id"`
+	BranchName       string    `json:"branch_name"`
+	BranchSlug       string    `json:"branch_slug"`
+	TotalReviews     int       `json:"total_reviews"`
+	AvgOverallRating float64   `json:"avg_overall_rating"`
+	AvgRestoRating   float64   `json:"avg_resto_rating"`
+	AvgAppRating     float64   `json:"avg_app_rating"`
+}
+
+type MenuItemRatingSummary struct {
+	ItemName      string   `json:"item_name"`
+	TotalReviews  int      `json:"total_reviews"`
+	AvgRating     float64  `json:"avg_rating"`
+	PositiveCount int      `json:"positive_count"`
+	NegativeCount int      `json:"negative_count"`
+	SampleReasons []string `json:"sample_reasons"`
+}
+
+type CommonTagCount struct {
+	Tag        string `json:"tag"`
+	Count      int    `json:"count"`
+	IsPositive bool   `json:"is_positive"`
+}
+
+type FeedbackAnalytics struct {
+	TotalReviews        int                     `json:"total_reviews"`
+	AvgOverallRating    float64                 `json:"avg_overall_rating"`
+	AvgRestoRating      float64                 `json:"avg_resto_rating"`
+	AvgAppRating        float64                 `json:"avg_app_rating"`
+	SatisfactionRate    float64                 `json:"satisfaction_rate"` // % rating >= 4
+	PositiveCount       int                     `json:"positive_count"`
+	ConstructiveCount   int                     `json:"constructive_count"`
+	RatingBreakdown     []RatingCount           `json:"rating_breakdown"`
+	BranchSummaries     []BranchRatingSummary   `json:"branch_summaries"`
+	TopMenuItems        []MenuItemRatingSummary `json:"top_menu_items"`
+	NeedsAttentionItems []MenuItemRatingSummary `json:"needs_attention_items"`
+	CommonTags          []CommonTagCount        `json:"common_tags"`
+}
+
+type FeedbackListResponse struct {
+	Items      []model.OrderFeedbackAdminItem `json:"items"`
+	Total      int                            `json:"total"`
+	Page       int                            `json:"page"`
+	Limit      int                            `json:"limit"`
+	TotalPages int                            `json:"total_pages"`
+}
+
+type FeedbackAISummaryResponse struct {
+	Configured            bool     `json:"configured"`
+	Model                 string   `json:"model"`
+	ExecutiveSummary      string   `json:"executive_summary"`
+	DetailSummary         string   `json:"detail_summary"`
+	ActionableSuggestions []string `json:"actionable_suggestions"`
+	RawAnalysis           string   `json:"raw_analysis,omitempty"`
+	GeneratedAt           string   `json:"generated_at"`
+	Error                 string   `json:"error,omitempty"`
 }
 
 type CreatePaymentRequest struct {

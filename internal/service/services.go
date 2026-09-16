@@ -47,6 +47,7 @@ type Service struct {
 	hub        *ws.Hub
 	snapClient snap.Client
 	geocoder   *geocoder
+	gemini     *GeminiClient
 }
 
 func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *Service {
@@ -55,6 +56,7 @@ func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *S
 		cfg:      cfg,
 		hub:      hub,
 		geocoder: newGeocoder(cfg.GeocoderURL, cfg.GeocoderEmail),
+		gemini:   NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
 	}
 
 	env := midtrans.Sandbox
@@ -960,6 +962,60 @@ func (s *Service) SubmitOrderFeedback(ctx context.Context, orderID uuid.UUID, re
 		req.Comment,
 		modelItems,
 	)
+}
+
+func (s *Service) ListOrderFeedbackAdmin(
+	ctx context.Context,
+	branchID *uuid.UUID,
+	rating *int,
+	search string,
+	limit, offset int,
+) (*dto.FeedbackListResponse, error) {
+	items, total, err := s.repo.ListOrderFeedbackAdmin(ctx, branchID, rating, search, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	totalPages := 0
+	if limit > 0 {
+		totalPages = (total + limit - 1) / limit
+	}
+	page := 1
+	if limit > 0 {
+		page = (offset / limit) + 1
+	}
+	return &dto.FeedbackListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	}, nil
+}
+
+func (s *Service) GetFeedbackAnalytics(ctx context.Context, branchID *uuid.UUID) (*dto.FeedbackAnalytics, error) {
+	return s.repo.GetFeedbackAnalytics(ctx, branchID)
+}
+
+func (s *Service) GenerateFeedbackAISummary(ctx context.Context, branchID *uuid.UUID) (*dto.FeedbackAISummaryResponse, error) {
+	analytics, err := s.repo.GetFeedbackAnalytics(ctx, branchID)
+	if err != nil {
+		return nil, err
+	}
+
+	branchName := "Semua Cabang (Mareme Group)"
+	if branchID != nil {
+		branch, err := s.repo.FindBranchByID(ctx, *branchID)
+		if err == nil && branch != nil {
+			branchName = branch.Name
+		}
+	}
+
+	recentReviews, err := s.repo.GetRecentFeedbackForAI(ctx, branchID, 25)
+	if err != nil {
+		recentReviews = nil
+	}
+
+	return s.gemini.GenerateFeedbackSummary(ctx, branchName, analytics, recentReviews)
 }
 
 func isValidTransition(from, to string) bool {

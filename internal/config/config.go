@@ -32,6 +32,8 @@ type Config struct {
 	SMTPPassword      string `mapstructure:"SMTP_PASSWORD"`
 	AlertFromEmail    string `mapstructure:"ALERT_FROM_EMAIL"`
 	AlertToEmail      string `mapstructure:"ALERT_TO_EMAIL"`
+	GeminiAPIKey      string `mapstructure:"GEMINI_API_KEY"`
+	GeminiModel       string `mapstructure:"GEMINI_MODEL"`
 }
 
 func (c *Config) IsProduction() bool {
@@ -55,6 +57,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("GEOCODER_EMAIL", "")
 	viper.SetDefault("MIDTRANS_IS_PROD", false)
 	viper.SetDefault("SMTP_PORT", "587")
+	viper.SetDefault("GEMINI_API_KEY", "")
+	viper.SetDefault("GEMINI_MODEL", "gemini-2.5-flash")
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

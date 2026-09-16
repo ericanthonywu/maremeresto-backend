@@ -593,6 +593,64 @@ func (c *Controller) SubmitOrderFeedback(w http.ResponseWriter, r *http.Request)
 	ok(w, feedback)
 }
 
+func (c *Controller) ListFeedback(w http.ResponseWriter, r *http.Request) {
+	requested, _ := queryUUID(r, "branch_id")
+	branchID, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var ratingPtr *int
+	if ratingStr := r.URL.Query().Get("rating"); ratingStr != "" {
+		if rVal, err := strconv.Atoi(ratingStr); err == nil && rVal >= 1 && rVal <= 5 {
+			ratingPtr = &rVal
+		}
+	}
+
+	search := r.URL.Query().Get("search")
+	limit, offset := paging(r)
+
+	result, err := c.svc.ListOrderFeedbackAdmin(r.Context(), branchID, ratingPtr, search, limit, offset)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, result)
+}
+
+func (c *Controller) FeedbackAnalytics(w http.ResponseWriter, r *http.Request) {
+	requested, _ := queryUUID(r, "branch_id")
+	branchID, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	analytics, err := c.svc.GetFeedbackAnalytics(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, analytics)
+}
+
+func (c *Controller) GenerateFeedbackAISummary(w http.ResponseWriter, r *http.Request) {
+	requested, _ := queryUUID(r, "branch_id")
+	branchID, err := service.ResolveBranchScope(actor(r), requested)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	aiSummary, err := c.svc.GenerateFeedbackAISummary(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, aiSummary)
+}
+
 func paging(r *http.Request) (limit, offset int) {
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))

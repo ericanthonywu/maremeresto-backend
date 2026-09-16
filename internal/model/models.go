@@ -146,6 +146,25 @@ type OrderFeedback struct {
 	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
+type OrderFeedbackAdminItem struct {
+	OrderID       uuid.UUID           `json:"order_id"`
+	OrderNumber   string              `json:"order_number"`
+	CustomerName  string              `json:"customer_name"`
+	CustomerPhone string              `json:"customer_phone"`
+	BranchID      uuid.UUID           `json:"branch_id"`
+	BranchName    string              `json:"branch_name"`
+	BranchSlug    string              `json:"branch_slug"`
+	Rating        int                 `json:"rating"`
+	RestoRating   *int                `json:"resto_rating,omitempty"`
+	AppRating     *int                `json:"app_rating,omitempty"`
+	RestoReason   *string             `json:"resto_reason,omitempty"`
+	AppReason     *string             `json:"app_reason,omitempty"`
+	Comment       *string             `json:"comment,omitempty"`
+	ItemsFeedback []OrderItemFeedback `json:"items_feedback"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
+}
+
 type OrderItem struct {
 	ID           uuid.UUID  `json:"id"`
 	OrderID      uuid.UUID  `json:"order_id"`
