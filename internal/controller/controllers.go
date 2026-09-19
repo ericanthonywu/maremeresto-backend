@@ -161,8 +161,21 @@ func (c *Controller) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return only the identity fields; the raw claims carry JWT metadata that
-	// the client has no use for.
+	user, err := c.svc.GetUserByID(r.Context(), claims.UserID)
+	if err == nil && user != nil {
+		ok(w, dto.UserSummary{
+			ID:       user.ID,
+			Name:     user.Name,
+			Phone:    user.Phone,
+			Email:    user.Email,
+			Username: user.Username,
+			Role:     user.Role,
+			BranchID: user.BranchID,
+		})
+		return
+	}
+
+	// Fallback to claims if user query fails
 	ok(w, dto.UserSummary{
 		ID:       claims.UserID,
 		Phone:    claims.Phone,
@@ -1089,3 +1102,81 @@ func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// ---------------------------------------------------------------------
+// Credentials & Password Management
+// ---------------------------------------------------------------------
+
+func (c *Controller) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	if claims == nil {
+		writeError(w, apperror.ErrUnauthorized)
+		return
+	}
+
+	var req dto.ChangePasswordRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if err := c.svc.ChangePassword(r.Context(), claims.UserID, req.CurrentPassword, req.NewPassword); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ok(w, map[string]any{
+		"success": true,
+		"message": "Password berhasil diubah",
+	})
+}
+
+func (c *Controller) ListBranchCredentials(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	list, err := c.svc.ListBranchCredentials(r.Context(), claims)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, list)
+}
+
+func (c *Controller) GetBranchCredentials(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	branchID, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	creds, err := c.svc.GetBranchCredentials(r.Context(), claims, branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, creds)
+}
+
+func (c *Controller) UpdateBranchCredentials(w http.ResponseWriter, r *http.Request) {
+	claims := actor(r)
+	branchID, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req dto.UpdateBranchCredentialsRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	creds, err := c.svc.UpdateBranchCredentials(r.Context(), claims, branchID, &req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ok(w, creds)
+}
+

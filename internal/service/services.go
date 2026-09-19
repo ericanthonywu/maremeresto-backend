@@ -215,18 +215,7 @@ func (s *Service) AdminLogin(ctx context.Context, identifier, password string) (
 		return nil, apperror.ErrUnauthorized
 	}
 
-	var user *model.User
-	var err error
-
-	if strings.Contains(identifier, "@") {
-		user, err = s.repo.FindUserByEmail(ctx, strings.ToLower(identifier))
-	} else {
-		normalized, errNorm := dto.NormalizeIndonesianPhone(identifier)
-		if errNorm != nil {
-			return nil, apperror.ErrUnauthorized
-		}
-		user, err = s.repo.FindUserByPhone(ctx, normalized)
-	}
+	user, err := s.repo.FindStaffByIdentifier(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +251,8 @@ func (s *Service) AdminLogin(ctx context.Context, identifier, password string) (
 			ID:       user.ID,
 			Name:     user.Name,
 			Phone:    user.Phone,
+			Email:    user.Email,
+			Username: user.Username,
 			Role:     user.Role,
 			BranchID: user.BranchID,
 		},
@@ -1788,3 +1779,88 @@ func (s *Service) UploadAndCompressImage(ctx context.Context, fileHeader *multip
 func (s *Service) GetDashboardStats(ctx context.Context, branchID *uuid.UUID) (*dto.DashboardStats, error) {
 	return s.repo.GetDashboardStats(ctx, branchID, OutletLocation)
 }
+
+// ---------------------------------------------------------------------
+// Staff Credentials & Password Management
+// ---------------------------------------------------------------------
+
+func (s *Service) GetUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
+	return s.repo.FindUserByID(ctx, id)
+}
+
+// ChangePassword changes the password for the current user after validating their old password.
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	req := dto.ChangePasswordRequest{
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	}
+	if err := req.Validate(); err != nil {
+		return err
+	}
+
+	user, err := s.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return apperror.ErrUnauthorized
+	}
+	if user.PasswordHash == nil || *user.PasswordHash == "" {
+		return apperror.Invalid("akun ini belum memiliki password yang terpasang")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		return apperror.Invalid("password saat ini tidak sesuai")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.UpdateUserPassword(ctx, userID, string(hash))
+}
+
+// ListBranchCredentials returns all branch credentials overview (Owner only).
+func (s *Service) ListBranchCredentials(ctx context.Context, actor *middleware.JWTClaims) ([]dto.BranchCredentialsResponse, error) {
+	if actor == nil || actor.Role != "owner" {
+		return nil, apperror.ErrForbidden
+	}
+	return s.repo.ListBranchCredentials(ctx)
+}
+
+// GetBranchCredentials returns credentials for a single branch.
+func (s *Service) GetBranchCredentials(ctx context.Context, actor *middleware.JWTClaims, branchID uuid.UUID) (*dto.BranchCredentialsResponse, error) {
+	if actor == nil || (actor.Role != "owner" && (actor.BranchID == nil || *actor.BranchID != branchID)) {
+		return nil, apperror.ErrForbidden
+	}
+	return s.repo.GetBranchCredentials(ctx, branchID)
+}
+
+// UpdateBranchCredentials updates the username and/or password for a branch account (Owner only).
+func (s *Service) UpdateBranchCredentials(
+	ctx context.Context,
+	actor *middleware.JWTClaims,
+	branchID uuid.UUID,
+	req *dto.UpdateBranchCredentialsRequest,
+) (*dto.BranchCredentialsResponse, error) {
+	if actor == nil || actor.Role != "owner" {
+		return nil, apperror.ErrForbidden
+	}
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	var passwordHash *string
+	if req.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		h := string(hash)
+		passwordHash = &h
+	}
+
+	return s.repo.UpsertBranchStaffCredentials(ctx, branchID, req.Username, passwordHash, req.Email, req.Name, req.Phone)
+}
+

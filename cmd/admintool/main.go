@@ -76,7 +76,7 @@ func fail(format string, args ...any) {
 
 func listStaff(ctx context.Context, pool *pgxpool.Pool) {
 	rows, err := pool.Query(ctx, `
-		SELECT u.email, u.phone, u.name, u.role, COALESCE(b.name, '-') AS branch,
+		SELECT u.email, COALESCE(u.username, '-'), u.phone, u.name, u.role, COALESCE(b.name, '-') AS branch,
 		       (u.password_hash IS NOT NULL) AS can_sign_in
 		FROM users u
 		LEFT JOIN branches b ON u.branch_id = b.id
@@ -88,12 +88,12 @@ func listStaff(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	defer rows.Close()
 
-	fmt.Printf("%-32s %-16s %-20s %-14s %-20s %s\n", "EMAIL", "PHONE", "NAME", "ROLE", "BRANCH", "CAN SIGN IN")
+	fmt.Printf("%-28s %-16s %-16s %-18s %-14s %-18s %s\n", "EMAIL", "USERNAME", "PHONE", "NAME", "ROLE", "BRANCH", "CAN SIGN IN")
 	for rows.Next() {
 		var email *string
-		var phone, name, role, branch string
+		var username, phone, name, role, branch string
 		var canSignIn bool
-		if err := rows.Scan(&email, &phone, &name, &role, &branch, &canSignIn); err != nil {
+		if err := rows.Scan(&email, &username, &phone, &name, &role, &branch, &canSignIn); err != nil {
 			fail("scan: %v", err)
 		}
 		e := "(none)"
@@ -104,7 +104,7 @@ func listStaff(ctx context.Context, pool *pgxpool.Pool) {
 		if canSignIn {
 			status = "yes"
 		}
-		fmt.Printf("%-32s %-16s %-20s %-14s %-20s %s\n", e, phone, name, role, branch, status)
+		fmt.Printf("%-28s %-16s %-16s %-18s %-14s %-18s %s\n", e, username, phone, name, role, branch, status)
 	}
 	if err := rows.Err(); err != nil {
 		fail("rows: %v", err)
@@ -116,26 +116,22 @@ func setPassword(ctx context.Context, pool *pgxpool.Pool, identifier string) {
 
 	var (
 		userID, name, role string
-		clause             string
-		arg                any
 	)
-	if strings.Contains(identifier, "@") {
-		clause = "LOWER(email) = LOWER($1)"
-		arg = identifier
-	} else {
-		normalized, err := dto.NormalizeIndonesianPhone(identifier)
-		if err != nil {
-			fail("%q is not a valid email address or Indonesian phone number", identifier)
-		}
-		clause = "phone = $1"
-		arg = normalized
-	}
+	normalized, _ := dto.NormalizeIndonesianPhone(identifier)
 
 	err := pool.QueryRow(ctx,
-		`SELECT id::text, name, role FROM users WHERE `+clause, arg,
+		`SELECT id::text, name, role FROM users
+		 WHERE (
+		   LOWER(email) = LOWER($1)
+		   OR LOWER(username) = LOWER($1)
+		   OR ($2 <> '' AND phone = $2)
+		 )
+		 AND role IN ('branch_admin', 'owner')
+		 LIMIT 1`,
+		identifier, normalized,
 	).Scan(&userID, &name, &role)
 	if err != nil {
-		fail("no user matches %q (%v)", identifier, err)
+		fail("no staff user matches %q (%v)", identifier, err)
 	}
 	if role != "branch_admin" && role != "owner" {
 		fail("%s is a %s account; only staff accounts use a password", identifier, role)

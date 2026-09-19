@@ -13,6 +13,8 @@ type User struct {
 	Role         string     `json:"role"` // customer, branch_admin, owner
 	BranchID     *uuid.UUID `json:"branch_id,omitempty"`
 	PasswordHash *string    `json:"-"`
+	Email        *string    `json:"email,omitempty"`
+	Username     *string    `json:"username,omitempty"`
 	Address      *string    `json:"address,omitempty"`
 	Latitude     *float64   `json:"latitude,omitempty"`
 	Longitude    *float64   `json:"longitude,omitempty"`

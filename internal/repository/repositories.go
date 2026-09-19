@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -32,10 +33,10 @@ func (r *Repository) DB() *pgxpool.Pool {
 // User Repository
 // ---------------------------------------------------------------------
 func (r *Repository) FindUserByPhone(ctx context.Context, phone string) (*model.User, error) {
-	query := `SELECT id, phone, name, role, branch_id, password_hash, address, latitude, longitude, created_at, updated_at FROM users WHERE phone = $1`
+	query := `SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at FROM users WHERE phone = $1`
 	var u model.User
 	err := r.db.QueryRow(ctx, query, phone).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Email, &u.Username, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -49,10 +50,10 @@ func (r *Repository) FindUserByPhone(ctx context.Context, phone string) (*model.
 // FindUserByEmail resolves a staff sign-in. Email replaces the hardcoded
 // email->phone switch that previously lived in the service layer.
 func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*model.User, error) {
-	query := `SELECT id, phone, name, role, branch_id, password_hash, address, latitude, longitude, created_at, updated_at FROM users WHERE LOWER(email) = LOWER($1)`
+	query := `SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at FROM users WHERE LOWER(email) = LOWER($1)`
 	var u model.User
 	err := r.db.QueryRow(ctx, query, email).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Email, &u.Username, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -64,10 +65,10 @@ func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*model.
 }
 
 func (r *Repository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
-	query := `SELECT id, phone, name, role, branch_id, password_hash, address, latitude, longitude, created_at, updated_at FROM users WHERE id = $1`
+	query := `SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at FROM users WHERE id = $1`
 	var u model.User
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Email, &u.Username, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -77,6 +78,273 @@ func (r *Repository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.Use
 	}
 	return &u, nil
 }
+
+// FindStaffByIdentifier resolves a staff account by username, email, or Indonesian phone.
+func (r *Repository) FindStaffByIdentifier(ctx context.Context, identifier string) (*model.User, error) {
+	trimmed := strings.TrimSpace(identifier)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	normalizedPhone := ""
+	if p, err := dto.NormalizeIndonesianPhone(trimmed); err == nil {
+		normalizedPhone = p
+	}
+
+	query := `
+		SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at
+		FROM users
+		WHERE role IN ('owner', 'branch_admin')
+		  AND (
+		    LOWER(email) = LOWER($1)
+		    OR LOWER(COALESCE(username, '')) = LOWER($1)
+		    OR ($2 <> '' AND phone = $2)
+		  )
+		LIMIT 1
+	`
+	var u model.User
+	err := r.db.QueryRow(ctx, query, trimmed, normalizedPhone).Scan(
+		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Email, &u.Username, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *Repository) UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	query := `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`
+	tag, err := r.db.Exec(ctx, query, passwordHash, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ListBranchCredentials(ctx context.Context) ([]dto.BranchCredentialsResponse, error) {
+	query := `
+		SELECT
+			b.id,
+			b.name,
+			b.slug,
+			u.id,
+			COALESCE(u.name, ''),
+			COALESCE(u.username, ''),
+			COALESCE(u.email, ''),
+			COALESCE(u.phone, ''),
+			(u.password_hash IS NOT NULL AND u.password_hash <> ''),
+			u.updated_at
+		FROM branches b
+		LEFT JOIN users u ON u.branch_id = b.id AND u.role = 'branch_admin'
+		ORDER BY b.name ASC
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []dto.BranchCredentialsResponse
+	for rows.Next() {
+		var item dto.BranchCredentialsResponse
+		var userID *uuid.UUID
+		var updatedAt *time.Time
+		if err := rows.Scan(
+			&item.BranchID,
+			&item.BranchName,
+			&item.BranchSlug,
+			&userID,
+			&item.Name,
+			&item.Username,
+			&item.Email,
+			&item.Phone,
+			&item.HasPassword,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.UserID = userID
+		item.UpdatedAt = updatedAt
+		list = append(list, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (r *Repository) GetBranchCredentials(ctx context.Context, branchID uuid.UUID) (*dto.BranchCredentialsResponse, error) {
+	query := `
+		SELECT
+			b.id,
+			b.name,
+			b.slug,
+			u.id,
+			COALESCE(u.name, ''),
+			COALESCE(u.username, ''),
+			COALESCE(u.email, ''),
+			COALESCE(u.phone, ''),
+			(u.password_hash IS NOT NULL AND u.password_hash <> ''),
+			u.updated_at
+		FROM branches b
+		LEFT JOIN users u ON u.branch_id = b.id AND u.role = 'branch_admin'
+		WHERE b.id = $1
+		LIMIT 1
+	`
+	var item dto.BranchCredentialsResponse
+	var userID *uuid.UUID
+	var updatedAt *time.Time
+	err := r.db.QueryRow(ctx, query, branchID).Scan(
+		&item.BranchID,
+		&item.BranchName,
+		&item.BranchSlug,
+		&userID,
+		&item.Name,
+		&item.Username,
+		&item.Email,
+		&item.Phone,
+		&item.HasPassword,
+		&updatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apperror.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	item.UserID = userID
+	item.UpdatedAt = updatedAt
+	return &item, nil
+}
+
+func (r *Repository) CheckUsernameTaken(ctx context.Context, username string, excludeUserID *uuid.UUID) (bool, error) {
+	query := `SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)`
+	args := []any{username}
+	if excludeUserID != nil {
+		query += ` AND id <> $2`
+		args = append(args, *excludeUserID)
+	}
+	var dummy int
+	err := r.db.QueryRow(ctx, query, args...).Scan(&dummy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) CheckEmailTaken(ctx context.Context, email string, excludeUserID *uuid.UUID) (bool, error) {
+	query := `SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)`
+	args := []any{email}
+	if excludeUserID != nil {
+		query += ` AND id <> $2`
+		args = append(args, *excludeUserID)
+	}
+	var dummy int
+	err := r.db.QueryRow(ctx, query, args...).Scan(&dummy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) UpsertBranchStaffCredentials(
+	ctx context.Context,
+	branchID uuid.UUID,
+	username string,
+	passwordHash *string,
+	email, name, phone string,
+) (*dto.BranchCredentialsResponse, error) {
+	var branchSlug, branchName string
+	err := r.db.QueryRow(ctx, `SELECT slug, name FROM branches WHERE id = $1`, branchID).Scan(&branchSlug, &branchName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apperror.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var existingUserID *uuid.UUID
+	err = r.db.QueryRow(ctx, `SELECT id FROM users WHERE branch_id = $1 AND role = 'branch_admin' LIMIT 1`, branchID).Scan(&existingUserID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	isTaken, err := r.CheckUsernameTaken(ctx, username, existingUserID)
+	if err != nil {
+		return nil, err
+	}
+	if isTaken {
+		return nil, apperror.Invalid(fmt.Sprintf("username %q sudah digunakan akun lain", username))
+	}
+
+	if email != "" {
+		isTaken, err := r.CheckEmailTaken(ctx, email, existingUserID)
+		if err != nil {
+			return nil, err
+		}
+		if isTaken {
+			return nil, apperror.Invalid(fmt.Sprintf("email %q sudah digunakan akun lain", email))
+		}
+	}
+
+	if existingUserID != nil {
+		query := `
+			UPDATE users
+			SET username = $1,
+			    email = CASE WHEN $2 <> '' THEN $2 ELSE email END,
+			    name = CASE WHEN $3 <> '' THEN $3 ELSE name END,
+			    phone = CASE WHEN $4 <> '' THEN $4 ELSE phone END,
+			    password_hash = COALESCE($5, password_hash),
+			    updated_at = NOW()
+			WHERE id = $6
+		`
+		_, err = r.db.Exec(ctx, query, username, email, name, phone, passwordHash, *existingUserID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		defaultName := name
+		if defaultName == "" {
+			defaultName = "Admin " + branchName
+		}
+		defaultPhone := phone
+		if defaultPhone == "" {
+			hexClean := strings.ReplaceAll(branchID.String(), "-", "")
+			if len(hexClean) > 8 {
+				hexClean = hexClean[len(hexClean)-8:]
+			}
+			defaultPhone = "+62899" + hexClean
+		}
+		defaultEmail := email
+		if defaultEmail == "" {
+			defaultEmail = fmt.Sprintf("admin.%s@cafeolga.id", branchSlug)
+		}
+
+		insertQuery := `
+			INSERT INTO users (id, phone, name, role, branch_id, email, username, password_hash, created_at, updated_at)
+			VALUES (gen_random_uuid(), $1, $2, 'branch_admin', $3, $4, $5, $6, NOW(), NOW())
+		`
+		_, err = r.db.Exec(ctx, insertQuery, defaultPhone, defaultName, branchID, defaultEmail, username, passwordHash)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return r.GetBranchCredentials(ctx, branchID)
+}
+
 
 func (r *Repository) CreateCustomer(ctx context.Context, phone, name string) (*model.User, error) {
 	query := `INSERT INTO users (phone, name, role) VALUES ($1, $2, 'customer') RETURNING id, phone, name, role, branch_id, created_at, updated_at`
@@ -465,6 +733,19 @@ func (r *Repository) EnsureFeedbackSchema(ctx context.Context) {
 		ALTER TABLE order_items
 			ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating IS NULL OR (rating BETWEEN 1 AND 5)),
 			ADD COLUMN IF NOT EXISTS review_reason TEXT;
+	`)
+}
+
+func (r *Repository) EnsureStaffCredentialsSchema(ctx context.Context) {
+	_, _ = r.db.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email)) WHERE email IS NOT NULL;
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(100);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(LOWER(username)) WHERE username IS NOT NULL;
+		UPDATE users SET username = 'owner' WHERE email = 'owner@cafeolga.id' AND (username IS NULL OR username = '');
+		UPDATE users SET username = 'admin.kerten' WHERE email = 'admin.kerten@cafeolga.id' AND (username IS NULL OR username = '');
+		UPDATE users SET username = 'admin.makamhaji' WHERE email = 'admin.makamhaji@cafeolga.id' AND (username IS NULL OR username = '');
+		UPDATE users SET username = 'admin.makdjan' WHERE email = 'admin.makdjan@cafeolga.id' AND (username IS NULL OR username = '');
 	`)
 }
 

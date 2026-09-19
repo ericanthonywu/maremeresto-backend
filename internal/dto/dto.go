@@ -83,6 +83,8 @@ type UserSummary struct {
 	ID       uuid.UUID  `json:"id"`
 	Name     string     `json:"name"`
 	Phone    string     `json:"phone"`
+	Email    *string    `json:"email,omitempty"`
+	Username *string    `json:"username,omitempty"`
 	Role     string     `json:"role"`
 	BranchID *uuid.UUID `json:"branch_id,omitempty"`
 }
@@ -763,3 +765,79 @@ type DashboardStats struct {
 	Branches         []BranchSalesPoint `json:"branches,omitempty"`
 	UnacknowledgedID []uuid.UUID        `json:"-"`
 }
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+func (r *ChangePasswordRequest) Validate() error {
+	r.CurrentPassword = strings.TrimSpace(r.CurrentPassword)
+	r.NewPassword = strings.TrimSpace(r.NewPassword)
+	if r.CurrentPassword == "" {
+		return apperror.Invalid("password saat ini wajib diisi")
+	}
+	if len(r.NewPassword) < 8 {
+		return apperror.Invalid("password baru minimal 8 karakter")
+	}
+	if r.NewPassword == r.CurrentPassword {
+		return apperror.Invalid("password baru tidak boleh sama dengan password saat ini")
+	}
+	return nil
+}
+
+type BranchCredentialsResponse struct {
+	BranchID    uuid.UUID  `json:"branch_id"`
+	BranchName  string     `json:"branch_name"`
+	BranchSlug  string     `json:"branch_slug"`
+	UserID      *uuid.UUID `json:"user_id,omitempty"`
+	Name        string     `json:"name"`
+	Username    string     `json:"username"`
+	Email       string     `json:"email"`
+	Phone       string     `json:"phone"`
+	HasPassword bool       `json:"has_password"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+}
+
+var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+type UpdateBranchCredentialsRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+}
+
+func (r *UpdateBranchCredentialsRequest) Validate() error {
+	r.Username = strings.TrimSpace(r.Username)
+	r.Password = strings.TrimSpace(r.Password)
+	r.Name = strings.TrimSpace(r.Name)
+	r.Email = strings.TrimSpace(r.Email)
+	r.Phone = strings.TrimSpace(r.Phone)
+
+	if r.Username == "" {
+		return apperror.Invalid("username cabang wajib diisi")
+	}
+	if len(r.Username) < 3 || len(r.Username) > 50 {
+		return apperror.Invalid("username harus antara 3 sampai 50 karakter")
+	}
+	if !validUsernameRegex.MatchString(r.Username) {
+		return apperror.Invalid("username hanya boleh berisi huruf, angka, titik (.), minus (-), atau underscore (_)")
+	}
+	if r.Password != "" && len(r.Password) < 8 {
+		return apperror.Invalid("password minimal 8 karakter")
+	}
+	if r.Email != "" && !strings.Contains(r.Email, "@") {
+		return apperror.Invalid("format email tidak valid")
+	}
+	if r.Phone != "" {
+		normalized, err := NormalizeIndonesianPhone(r.Phone)
+		if err != nil {
+			return err
+		}
+		r.Phone = normalized
+	}
+	return nil
+}
+

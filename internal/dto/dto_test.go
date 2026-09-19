@@ -320,3 +320,93 @@ func TestOrderFeedbackRequestValidate(t *testing.T) {
 	}
 }
 
+func TestChangePasswordValidation(t *testing.T) {
+	valid := ChangePasswordRequest{
+		CurrentPassword: "oldSecretPassword123",
+		NewPassword:     "newSecretPassword456",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid change password request, got %v", err)
+	}
+
+	// Empty current password
+	missingCurrent := ChangePasswordRequest{
+		CurrentPassword: "",
+		NewPassword:     "newSecretPassword456",
+	}
+	if err := missingCurrent.Validate(); err == nil {
+		t.Error("expected error when current_password is empty")
+	}
+
+	// New password too short
+	shortNew := ChangePasswordRequest{
+		CurrentPassword: "oldSecretPassword123",
+		NewPassword:     "short",
+	}
+	if err := shortNew.Validate(); err == nil {
+		t.Error("expected error when new_password is too short")
+	}
+
+	// New password same as current password
+	same := ChangePasswordRequest{
+		CurrentPassword: "samePassword123",
+		NewPassword:     "samePassword123",
+	}
+	if err := same.Validate(); err == nil {
+		t.Error("expected error when new_password is same as current_password")
+	}
+}
+
+func TestUpdateBranchCredentialsValidation(t *testing.T) {
+	valid := UpdateBranchCredentialsRequest{
+		Username: "kerten.admin",
+		Password: "strongPassword123",
+		Name:     "Admin Kerten",
+		Email:    "kerten@cafeolga.id",
+		Phone:    "081234567890",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid branch credentials request, got %v", err)
+	}
+
+	// Username normalized/trimmed
+	if valid.Username != "kerten.admin" || valid.Phone != "+6281234567890" {
+		t.Errorf("expected normalized values, got username=%q phone=%q", valid.Username, valid.Phone)
+	}
+
+	// Invalid username with spaces
+	invalidUsername := UpdateBranchCredentialsRequest{
+		Username: "invalid user name",
+	}
+	if err := invalidUsername.Validate(); err == nil {
+		t.Error("expected error for username containing spaces")
+	}
+
+	// Username too short
+	shortUser := UpdateBranchCredentialsRequest{
+		Username: "ab",
+	}
+	if err := shortUser.Validate(); err == nil {
+		t.Error("expected error for username < 3 chars")
+	}
+
+	// Password provided but too short
+	shortPw := UpdateBranchCredentialsRequest{
+		Username: "validuser",
+		Password: "123",
+	}
+	if err := shortPw.Validate(); err == nil {
+		t.Error("expected error for password < 8 chars")
+	}
+
+	// Invalid email
+	invalidEmail := UpdateBranchCredentialsRequest{
+		Username: "validuser",
+		Email:    "notanemail",
+	}
+	if err := invalidEmail.Validate(); err == nil {
+		t.Error("expected error for invalid email format")
+	}
+}
+
+

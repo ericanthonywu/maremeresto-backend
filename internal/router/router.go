@@ -145,6 +145,7 @@ func registerRESTRoutes(
 		admin.Post("/api/v1/admin/feedback/ai-summary", ctrl.GenerateFeedbackAISummary)
 
 		admin.Post("/api/v1/admin/upload", ctrl.UploadImage)
+		admin.Put("/api/v1/admin/change-password", ctrl.ChangePassword)
 	})
 
 	// ---- Owner HQ ----
@@ -152,6 +153,9 @@ func registerRESTRoutes(
 		owner.Use(middleware.AuthRequired(cfg, "owner"))
 		owner.Get("/api/v1/owner/dashboard", ctrl.OwnerDashboard)
 		owner.Get("/api/v1/owner/orders", ctrl.ListOrders)
+		owner.Get("/api/v1/owner/branch-credentials", ctrl.ListBranchCredentials)
+		owner.Get("/api/v1/owner/branches/{id}/credentials", ctrl.GetBranchCredentials)
+		owner.Put("/api/v1/owner/branches/{id}/credentials", ctrl.UpdateBranchCredentials)
 	})
 }
 
