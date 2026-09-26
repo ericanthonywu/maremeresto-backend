@@ -121,6 +121,7 @@ type Order struct {
 	Items              []OrderItem    `json:"items,omitempty"`
 	Payment            *Payment       `json:"payment,omitempty"`
 	Feedback           *OrderFeedback `json:"feedback,omitempty"`
+	IsFirstOrder       bool           `json:"is_first_order"`
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 }

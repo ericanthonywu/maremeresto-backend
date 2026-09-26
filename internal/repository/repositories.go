@@ -707,7 +707,72 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 	}
 	o.Feedback = feedback
 
+	isFirst, err := r.IsFirstOrderForCustomer(ctx, o.ID, o.UserID, o.CustomerPhone, o.CreatedAt)
+	if err == nil {
+		o.IsFirstOrder = isFirst
+	}
+
 	return &o, nil
+}
+
+// IsFirstOrderForCustomer checks if an order is the customer's first order (no prior non-cancelled orders
+// and no previous app rating submitted).
+func (r *Repository) IsFirstOrderForCustomer(ctx context.Context, orderID uuid.UUID, userID *uuid.UUID, customerPhone string, createdAt time.Time) (bool, error) {
+	var priorCount int
+	var err error
+	if userID != nil {
+		query := `
+			SELECT COUNT(*)
+			FROM orders
+			WHERE (user_id = $1 OR customer_phone = $2)
+			  AND id != $3
+			  AND created_at <= $4
+			  AND status NOT IN ('cancelled', 'rejected')
+		`
+		err = r.db.QueryRow(ctx, query, *userID, customerPhone, orderID, createdAt).Scan(&priorCount)
+	} else {
+		query := `
+			SELECT COUNT(*)
+			FROM orders
+			WHERE customer_phone = $1
+			  AND id != $2
+			  AND created_at <= $3
+			  AND status NOT IN ('cancelled', 'rejected')
+		`
+		err = r.db.QueryRow(ctx, query, customerPhone, orderID, createdAt).Scan(&priorCount)
+	}
+	if err != nil {
+		return false, err
+	}
+	if priorCount > 0 {
+		return false, nil
+	}
+
+	// Also check if customer has ever submitted an app rating on another order
+	var appRatingCount int
+	if userID != nil {
+		query := `
+			SELECT COUNT(*)
+			FROM order_feedback f
+			JOIN orders ord ON ord.id = f.order_id
+			WHERE (ord.user_id = $1 OR ord.customer_phone = $2)
+			  AND f.order_id != $3
+			  AND f.app_rating IS NOT NULL
+		`
+		_ = r.db.QueryRow(ctx, query, *userID, customerPhone, orderID).Scan(&appRatingCount)
+	} else {
+		query := `
+			SELECT COUNT(*)
+			FROM order_feedback f
+			JOIN orders ord ON ord.id = f.order_id
+			WHERE ord.customer_phone = $1
+			  AND f.order_id != $2
+			  AND f.app_rating IS NOT NULL
+		`
+		_ = r.db.QueryRow(ctx, query, customerPhone, orderID).Scan(&appRatingCount)
+	}
+
+	return (appRatingCount == 0), nil
 }
 
 func (r *Repository) EnsureFeedbackSchema(ctx context.Context) {
