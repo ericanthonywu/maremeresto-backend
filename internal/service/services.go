@@ -1157,7 +1157,15 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 			Phone: order.CustomerPhone,
 		},
 		Items:           snapItems(order),
-		EnabledPayments: nil, // Allow full Snap channels (QRIS, GoPay, ShopeePay, Bank Transfer, etc.)
+		EnabledPayments: []snap.SnapPaymentType{
+			snap.SnapPaymentType("other_qris"),
+			snap.PaymentTypeGopay,
+			snap.PaymentTypeBCAVA,
+			snap.PaymentTypeBNIVA,
+			snap.PaymentTypeBRIVA,
+			snap.PaymentTypePermataVA,
+			snap.PaymentTypeOtherVA,
+		},
 		Expiry: &snap.ExpiryDetails{
 			Unit:     "minute",
 			Duration: int64(paymentWindow / time.Minute),
