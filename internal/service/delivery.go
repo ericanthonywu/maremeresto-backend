@@ -22,7 +22,29 @@ const (
 	preparationMinute = 8
 	minBillableKm     = 0.5
 	maxServiceableKm  = 10.0
+
+	// Greater Surakarta (Solo Raya) bounding box matching soloViewbox in geocode.go.
+	soloMinLat = -7.72
+	soloMaxLat = -7.42
+	soloMinLon = 110.65
+	soloMaxLon = 110.95
 )
+
+// IsWithinSoloArea reports whether a WGS-84 coordinate lies within Greater
+// Surakarta (Solo Raya). Delivery and scheduled orders outside this bounding
+// box are always out of range.
+func IsWithinSoloArea(lat, lon float64) bool {
+	return lat >= soloMinLat && lat <= soloMaxLat && lon >= soloMinLon && lon <= soloMaxLon
+}
+
+// effectiveMaxRadiusKm returns the branch's configured max delivery radius
+// capped by the hard platform maximum (maxServiceableKm = 10 km).
+func effectiveMaxRadiusKm(set *model.BranchSettings) float64 {
+	if set != nil && set.MaxDeliveryRadiusKm > 0 && float64(set.MaxDeliveryRadiusKm) < maxServiceableKm {
+		return float64(set.MaxDeliveryRadiusKm)
+	}
+	return maxServiceableKm
+}
 
 // HaversineKm returns the great-circle distance between two WGS-84 coordinates
 // in kilometres.
@@ -125,6 +147,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 	}
 
 	now := time.Now()
+	withinSolo := IsWithinSoloArea(req.Lat, req.Lon)
 	quotes := make([]dto.BranchDeliveryQuote, 0, len(branches))
 	nearestIdx := -1
 
@@ -133,7 +156,8 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 		distance := RoadDistanceKm(req.Lat, req.Lon, b.Latitude, b.Longitude)
 		fee := DeliveryFee(set, distance, req.Subtotal, orderType)
 
-		serviceable := distance <= maxServiceableKm
+		maxRadius := effectiveMaxRadiusKm(set)
+		serviceable := withinSolo && distance <= maxRadius
 		openNow := b.IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 
 		q := dto.BranchDeliveryQuote{
@@ -146,15 +170,19 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			ServiceFee:       set.ServiceFee,
 			MinOrderAmount:   0, // Minimum order removed
 			EtaMinutes:       EtaMinutes(distance),
-			MaxRadiusKm:      int(maxServiceableKm),
+			MaxRadiusKm:      int(maxRadius),
 			WithinRadius:     serviceable,
+			WithinSolo:       withinSolo,
 			FreeDeliveryFrom: 0,
 			IsOpenNow:        openNow,
 		}
 		quotes = append(quotes, q)
 
-		// Nearest = closest branch that can actually take the order right now;
-		// fall back to closest overall so the UI always has something selected.
+		// Nearest = closest branch within radius that can actually take the order right now;
+		// fall back to closest within radius even if closed.
+		if !q.WithinRadius {
+			continue
+		}
 		if nearestIdx == -1 {
 			nearestIdx = len(quotes) - 1
 			continue
@@ -167,8 +195,11 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 		}
 	}
 
-	resp := &dto.DeliveryQuoteResponse{Quotes: quotes}
-	if nearestIdx >= 0 {
+	resp := &dto.DeliveryQuoteResponse{
+		Quotes:     quotes,
+		WithinSolo: withinSolo,
+	}
+	if nearestIdx >= 0 && quotes[nearestIdx].WithinRadius {
 		quotes[nearestIdx].IsNearest = true
 		resp.NearestBranchID = &quotes[nearestIdx].BranchID
 	}

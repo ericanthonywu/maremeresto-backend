@@ -219,3 +219,57 @@ func TestFormatRupiah(t *testing.T) {
 		}
 	}
 }
+
+func TestIsWithinSoloArea(t *testing.T) {
+	// Kerten (Solo) -> inside Solo Raya
+	if !IsWithinSoloArea(-7.5561, 110.7931) {
+		t.Fatalf("expected Kerten (-7.5561, 110.7931) to be within Solo area")
+	}
+	// Makamhaji (Kartasura / Sukoharjo border) -> inside Solo Raya
+	if !IsWithinSoloArea(-7.5681, 110.7712) {
+		t.Fatalf("expected Makamhaji (-7.5681, 110.7712) to be within Solo area")
+	}
+	// Jakarta -> outside Solo Raya
+	if IsWithinSoloArea(-6.2088, 106.8456) {
+		t.Fatalf("expected Jakarta (-6.2088, 106.8456) to be outside Solo area")
+	}
+	// Yogyakarta -> outside Solo Raya
+	if IsWithinSoloArea(-7.7956, 110.3695) {
+		t.Fatalf("expected Yogyakarta (-7.7956, 110.3695) to be outside Solo area")
+	}
+}
+
+func TestEffectiveMaxRadiusKm(t *testing.T) {
+	if got := effectiveMaxRadiusKm(nil); got != 10.0 {
+		t.Fatalf("effectiveMaxRadiusKm(nil) = %v, want 10.0", got)
+	}
+	if got := effectiveMaxRadiusKm(&model.BranchSettings{MaxDeliveryRadiusKm: 7}); got != 7.0 {
+		t.Fatalf("effectiveMaxRadiusKm(7) = %v, want 7.0", got)
+	}
+	if got := effectiveMaxRadiusKm(&model.BranchSettings{MaxDeliveryRadiusKm: 15}); got != 10.0 {
+		t.Fatalf("effectiveMaxRadiusKm(15) = %v, want 10.0 (capped at maxServiceableKm)", got)
+	}
+}
+
+func TestSnapItemsSumMatchesGrandTotal(t *testing.T) {
+	order := &model.Order{
+		Items: []model.OrderItem{
+			{ItemName: "Nasi Goreng", ItemPrice: 22000, Quantity: 2, LineTotal: 44000},
+			{ItemName: "Es Teh", ItemPrice: 5000, Quantity: 1, LineTotal: 5000},
+		},
+		Subtotal:    49000,
+		DeliveryFee: 8000,
+		ServiceFee:  2000,
+		Discount:    5000,
+		GrandTotal:  54000,
+	}
+	items := snapItems(order)
+	var sum int64
+	for _, it := range *items {
+		sum += it.Price * int64(it.Qty)
+	}
+	if sum != int64(order.GrandTotal) {
+		t.Fatalf("snapItems sum = %d, want GrandTotal %d", sum, order.GrandTotal)
+	}
+}
+

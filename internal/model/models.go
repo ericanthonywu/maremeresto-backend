@@ -41,10 +41,12 @@ type Branch struct {
 	// Derived per-request from branch_settings.operating_hours. IsOpen is the
 	// manual master switch; IsOpenNow also accounts for the clock, and is what
 	// the storefront should trust.
-	IsOpenNow          bool   `json:"is_open_now"`
-	TodayHours         string `json:"today_hours,omitempty"`
-	WhatsappNumber     string `json:"whatsapp_number,omitempty"`
-	HalalCertificateID string `json:"halal_certificate_id,omitempty"`
+	IsOpenNow           bool   `json:"is_open_now"`
+	TodayHours          string `json:"today_hours,omitempty"`
+	WhatsappNumber      string `json:"whatsapp_number,omitempty"`
+	HalalCertificateID  string `json:"halal_certificate_id,omitempty"`
+	ServiceFee          int    `json:"service_fee"`
+	MaxDeliveryRadiusKm int    `json:"max_delivery_radius_km,omitempty"`
 }
 
 type BranchSettings struct {

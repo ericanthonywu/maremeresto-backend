@@ -713,6 +713,7 @@ type BranchDeliveryQuote struct {
 	EtaMinutes       int       `json:"eta_minutes"`
 	MaxRadiusKm      int       `json:"max_radius_km"`
 	WithinRadius     bool      `json:"within_radius"`
+	WithinSolo       bool      `json:"within_solo"`
 	FreeDeliveryFrom int       `json:"free_delivery_from"`
 	IsOpenNow        bool      `json:"is_open_now"`
 	IsNearest        bool      `json:"is_nearest"`
@@ -721,6 +722,7 @@ type BranchDeliveryQuote struct {
 type DeliveryQuoteResponse struct {
 	Quotes          []BranchDeliveryQuote `json:"quotes"`
 	NearestBranchID *uuid.UUID            `json:"nearest_branch_id,omitempty"`
+	WithinSolo      bool                  `json:"within_solo"`
 }
 
 // ---------------------------------------------------------------------

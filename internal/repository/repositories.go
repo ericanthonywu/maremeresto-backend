@@ -1092,12 +1092,61 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		orders = append(orders, o)
 	}
 
-	// Attach items in one round trip rather than a query per order.
+	// Attach items and payments in one round trip each rather than a query per order.
 	if err := r.attachOrderItems(ctx, orders); err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachOrderPayments(ctx, orders); err != nil {
 		return nil, 0, err
 	}
 
 	return orders, total, nil
+}
+
+// attachOrderPayments loads the payment rows for a page of orders with a single
+// query and fills them in place.
+func (r *Repository) attachOrderPayments(ctx context.Context, orders []model.Order) error {
+	if len(orders) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, len(orders))
+	index := make(map[uuid.UUID]int, len(orders))
+	for i := range orders {
+		ids[i] = orders[i].ID
+		index[orders[i].ID] = i
+	}
+
+	query := `
+		SELECT id, order_id, midtrans_order_id, payment_method, payment_type, status, amount,
+		       idempotency_key, snap_token, snap_redirect_url, qr_string, midtrans_transaction_id,
+		       paid_at, expires_at, refund_amount, refund_reason, refunded_at, refunded_by,
+		       created_at, updated_at
+		FROM payments
+		WHERE order_id = ANY($1)
+	`
+	rows, err := r.db.Query(ctx, query, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p model.Payment
+		if err := rows.Scan(
+			&p.ID, &p.OrderID, &p.MidtransOrderID, &p.PaymentMethod, &p.PaymentType, &p.Status, &p.Amount,
+			&p.IdempotencyKey, &p.SnapToken, &p.SnapRedirectURL, &p.QRString, &p.MidtransTransactionID,
+			&p.PaidAt, &p.ExpiresAt, &p.RefundAmount, &p.RefundReason, &p.RefundedAt, &p.RefundedBy,
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return err
+		}
+		if i, ok := index[p.OrderID]; ok {
+			pCopy := p
+			orders[i].Payment = &pCopy
+		}
+	}
+	return rows.Err()
 }
 
 // attachOrderItems loads the line items for a page of orders with a single

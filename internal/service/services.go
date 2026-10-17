@@ -298,13 +298,18 @@ func (s *Service) ListBranches(ctx context.Context) ([]model.Branch, error) {
 	for i := range branches {
 		set, ok := settings[branches[i].ID]
 		if !ok {
+			def := defaultSettings(branches[i].ID)
 			branches[i].IsOpenNow = branches[i].IsOpen
+			branches[i].ServiceFee = def.ServiceFee
+			branches[i].MaxDeliveryRadiusKm = int(effectiveMaxRadiusKm(def))
 			continue
 		}
 		branches[i].IsOpenNow = branches[i].IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 		branches[i].TodayHours = FormatOperatingHours(set.OperatingHours, now)
 		branches[i].WhatsappNumber = set.WhatsappNumber
 		branches[i].HalalCertificateID = set.HalalCertificateID
+		branches[i].ServiceFee = set.ServiceFee
+		branches[i].MaxDeliveryRadiusKm = int(effectiveMaxRadiusKm(&set))
 	}
 	return branches, nil
 }
@@ -324,6 +329,8 @@ func (s *Service) GetBranchBySlug(ctx context.Context, slug string) (*model.Bran
 	b.TodayHours = FormatOperatingHours(set.OperatingHours, now)
 	b.WhatsappNumber = set.WhatsappNumber
 	b.HalalCertificateID = set.HalalCertificateID
+	b.ServiceFee = set.ServiceFee
+	b.MaxDeliveryRadiusKm = int(effectiveMaxRadiusKm(set))
 	return b, nil
 }
 
@@ -671,6 +678,11 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	if !branch.IsOpen || !IsWithinOperatingHours(settings.OperatingHours, time.Now()) {
 		return nil, apperror.ErrStoreClosed
 	}
+	if req.OrderType == "scheduled" && req.ScheduledAt != nil {
+		if !IsWithinOperatingHours(settings.OperatingHours, *req.ScheduledAt) {
+			return nil, apperror.Invalid("waktu penjadwalan di luar jam operasional outlet")
+		}
+	}
 
 	normPhone, err := dto.NormalizeIndonesianPhone(req.CustomerPhone)
 	if err != nil {
@@ -732,10 +744,15 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 		if strings.TrimSpace(req.DeliveryAddress) == "" {
 			return nil, apperror.Invalid("alamat pengantaran wajib diisi")
 		}
+		if !IsWithinSoloArea(*req.DeliveryLat, *req.DeliveryLon) {
+			return nil, fmt.Errorf("%w (lokasi di luar area layanan Kota Surakarta / Solo Raya)",
+				apperror.ErrOutOfDeliveryRange)
+		}
+		maxRadius := effectiveMaxRadiusKm(settings)
 		distanceKm = RoadDistanceKm(*req.DeliveryLat, *req.DeliveryLon, branch.Latitude, branch.Longitude)
-		if distanceKm > maxServiceableKm {
+		if distanceKm > maxRadius {
 			return nil, fmt.Errorf("%w (jarak %.1f km, maksimal %d km)",
-				apperror.ErrOutOfDeliveryRange, distanceKm, int(maxServiceableKm))
+				apperror.ErrOutOfDeliveryRange, distanceKm, int(maxRadius))
 		}
 	}
 
@@ -784,6 +801,14 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	deliveryAddress := strings.TrimSpace(req.DeliveryAddress)
 	deliveryNotes := strings.TrimSpace(req.DeliveryNotes)
 
+	var addrPtr *string
+	var latPtr, lonPtr *float64
+	if isDelivery {
+		addrPtr = &deliveryAddress
+		latPtr = req.DeliveryLat
+		lonPtr = req.DeliveryLon
+	}
+
 	order := &model.Order{
 		OrderNumber:        orderNumber,
 		UserID:             userID,
@@ -792,10 +817,10 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 		Status:             "pending",
 		CustomerName:       strings.TrimSpace(req.CustomerName),
 		CustomerPhone:      normPhone,
-		DeliveryAddress:    &deliveryAddress,
+		DeliveryAddress:    addrPtr,
 		DeliveryNotes:      &deliveryNotes,
-		DeliveryLat:        req.DeliveryLat,
-		DeliveryLon:        req.DeliveryLon,
+		DeliveryLat:        latPtr,
+		DeliveryLon:        lonPtr,
 		DeliveryDistanceKm: distanceKm,
 		Subtotal:           subtotal,
 		DeliveryFee:        deliveryFee,
@@ -1134,13 +1159,56 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		return nil, apperror.ErrOrderNotPayable
 	}
 
+	// Guard: prevent opening or reusing a payment session if a delivery or
+	// scheduled order is out of range (outside Solo Raya or > branch max radius).
+	if order.OrderType == "delivery" || order.OrderType == "scheduled" {
+		if order.DeliveryLat == nil || order.DeliveryLon == nil || (*order.DeliveryLat == 0 && *order.DeliveryLon == 0) {
+			return nil, apperror.ErrLocationRequired
+		}
+		if !IsWithinSoloArea(*order.DeliveryLat, *order.DeliveryLon) {
+			return nil, fmt.Errorf("%w (lokasi di luar area layanan Kota Surakarta / Solo Raya)",
+				apperror.ErrOutOfDeliveryRange)
+		}
+		branch, bErr := s.repo.FindBranchByID(ctx, order.BranchID)
+		if bErr != nil {
+			return nil, bErr
+		}
+		if branch == nil {
+			return nil, apperror.ErrNotFound
+		}
+		settings := s.settingsFor(ctx, branch.ID)
+		maxRadius := effectiveMaxRadiusKm(settings)
+		distanceKm := RoadDistanceKm(*order.DeliveryLat, *order.DeliveryLon, branch.Latitude, branch.Longitude)
+		if distanceKm > maxRadius {
+			return nil, fmt.Errorf("%w (jarak %.1f km, maksimal %d km)",
+				apperror.ErrOutOfDeliveryRange, distanceKm, int(maxRadius))
+		}
+	}
+
+	// Guard: strictly verify server-side amount from stored order items + fees
+	// before generating the Snap session (client never supplies payment amounts).
+	if len(order.Items) == 0 {
+		return nil, apperror.Invalid("keranjang pesanan kosong")
+	}
+	computedSubtotal := 0
+	for _, it := range order.Items {
+		computedSubtotal += it.ItemPrice * it.Quantity
+	}
+	computedGrandTotal := computedSubtotal + order.DeliveryFee + order.ServiceFee - order.Discount
+	if computedGrandTotal < 0 {
+		computedGrandTotal = 0
+	}
+	if computedGrandTotal <= 0 || order.GrandTotal != computedGrandTotal {
+		return nil, apperror.Invalid("nominal pembayaran pesanan tidak valid")
+	}
+
 	if existingP, err := s.repo.FindPaymentByOrderID(ctx, req.OrderID); err == nil && existingP != nil {
 		if existingP.Status == "settlement" {
 			return nil, apperror.ErrOrderAlreadyPaid
 		}
 		// An unexpired pending attempt is reusable: hand back the same Snap
 		// session instead of opening a second one.
-		if existingP.Status == "pending" && time.Now().Before(existingP.ExpiresAt) {
+		if existingP.Status == "pending" && time.Now().Before(existingP.ExpiresAt) && existingP.Amount == computedGrandTotal {
 			return existingP, nil
 		}
 	}
@@ -1150,7 +1218,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 	snapReq := &snap.Request{
 		TransactionDetails: midtrans.TransactionDetails{
 			OrderID:  order.OrderNumber,
-			GrossAmt: int64(order.GrandTotal),
+			GrossAmt: int64(computedGrandTotal),
 		},
 		CustomerDetail: &midtrans.CustomerDetails{
 			FName: order.CustomerName,
