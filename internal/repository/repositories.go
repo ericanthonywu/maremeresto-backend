@@ -991,7 +991,7 @@ func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status
 // staff can see where work is waiting before switching tabs, while respecting
 // the active date filter.
 func (r *Repository) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID, dateFrom, dateTo *time.Time, includeActive bool) (map[string]int, error) {
-	query := `SELECT o.status, COUNT(*) FROM orders o WHERE 1=1`
+	query := `SELECT o.status, COUNT(*) FROM orders o WHERE o.status != 'pending'`
 	args := []any{}
 	idx := 1
 
@@ -1093,13 +1093,18 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		args = append(args, *branchID)
 		idx++
 	}
-	if status != "" && status != "all" {
-		baseQuery += fmt.Sprintf(" AND o.status = $%d", idx)
-		args = append(args, status)
-		idx++
-	} else if f.UserID == nil {
-		// Admin orders list: do not include unpaid pending orders unless explicitly asked
+	if f.UserID == nil {
+		// Admin orders list: do not include unpaid pending orders under any circumstances
 		baseQuery += " AND o.status != 'pending'"
+	}
+	if status != "" && status != "all" {
+		if f.UserID == nil && status == "pending" {
+			baseQuery += " AND 1=0"
+		} else {
+			baseQuery += fmt.Sprintf(" AND o.status = $%d", idx)
+			args = append(args, status)
+			idx++
+		}
 	}
 	if dateClause, dateArgs, nextIdx := buildOrderDateClause(f.DateFrom, f.DateTo, f.IncludeActive, idx); dateClause != "" {
 		baseQuery += " AND " + dateClause
