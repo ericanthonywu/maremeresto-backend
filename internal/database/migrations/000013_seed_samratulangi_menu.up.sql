@@ -2,6 +2,7 @@
 -- Clear all menu items and categories, update outlet names/contacts, and seed:
 -- 1. Mareme Kerten / Samratulangi (branch 11111111-1111-1111-1111-111111111111)
 -- 2. Mak Djan (branch 33333333-3333-3333-3333-333333333333)
+-- No improvised descriptions or tags.
 
 DELETE FROM menu_items;
 DELETE FROM categories;
@@ -59,180 +60,180 @@ BEGIN
     -- 1. ANEKA NASI GORENG (23 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo',             'Nasi goreng cabai hijau khas Mareme yang harum dan gurih.', 25500, 'fa-bowl-rice', 'bg-emerald-50', NULL,      true, 1),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Istimewa',    'Nasi goreng cabai hijau porsi spesial dengan topping lengkap.', 27000, 'fa-bowl-rice', 'bg-emerald-50', 'Favorit', true, 2),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Udang',       'Nasi goreng cabai hijau dipadu udang segar pilihan.', 26500, 'fa-bowl-rice', 'bg-emerald-50', NULL,      true, 3),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Udang Ist',   'Nasi goreng cabai hijau udang porsi istimewa lengkap.', 28000, 'fa-bowl-rice', 'bg-emerald-50', NULL,      true, 4),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Seafood',     'Nasi goreng cabai hijau dengan aneka seafood segar.', 27500, 'fa-bowl-rice', 'bg-emerald-50', NULL,      true, 5),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Seafood Ist', 'Nasi goreng cabai hijau seafood porsi istimewa lengkap.', 29000, 'fa-bowl-rice', 'bg-emerald-50', 'Best',    true, 6),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Sosis',           'Nasi goreng gurih dengan irisan sosis pilihan.', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 7),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Bakso',           'Nasi goreng bumbu rempah khas dengan irisan bakso.', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 8),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Mawut',           'Perpaduan nasi dan bakmi goreng khas dengan bumbu spesial.', 29000, 'fa-bowl-rice', 'bg-amber-50',   'Favorit', true, 9),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ayam',            'Nasi goreng klasik dengan suwiran daging ayam gurih.', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 10),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Ayam Ist',        'Nasi goreng ayam porsi istimewa dengan pelengkap spesial.', 27000, 'fa-bowl-rice', 'bg-amber-50',   'Best',    true, 11),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Kambing',         'Nasi goreng rempah harum dengan potongan daging kambing empuk.', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 12),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Kambing Ist',     'Nasi goreng kambing porsi istimewa lengkap.', 27000, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 13),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Babat',           'Nasi goreng gurih dengan potongan babat empuk khas Solo.', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 14),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Babat Ist',       'Nasi goreng babat porsi istimewa lengkap.', 27000, 'fa-bowl-rice', 'bg-amber-50',   'Favorit', true, 15),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Seafood',         'Nasi goreng spesial dengan campuran udang dan cumi segar.', 27500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 16),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Seafood Ist',     'Nasi goreng seafood porsi istimewa lengkap.', 29000, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 17),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Udang',           'Nasi goreng gurih dengan udang segar.', 26500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 18),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Udang Ist',       'Nasi goreng udang porsi istimewa lengkap.', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 19),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Sapi',            'Nasi goreng dengan irisan daging sapi empuk.', 26500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 20),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Sapi Ist',        'Nasi goreng daging sapi porsi istimewa lengkap.', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 21),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Lada Hitam',      'Nasi goreng dengan bumbu saus lada hitam hangat dan harum.', 27000, 'fa-bowl-rice', 'bg-stone-100',  NULL,      true, 22),
-        (b_kerten, cat_nasgor, 'Nasi Goreng Lada Hitam Ist',  'Nasi goreng lada hitam porsi istimewa lengkap.', 28500, 'fa-bowl-rice', 'bg-stone-100',  NULL,      true, 23);
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo',             '', 25500, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 1),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Istimewa',    '', 27000, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 2),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Udang',       '', 26500, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 3),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Udang Ist',   '', 28000, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 4),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Seafood',     '', 27500, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 5),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ijo Seafood Ist', '', 29000, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 6),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Sosis',           '', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 7),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Bakso',           '', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 8),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Mawut',           '', 29000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 9),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ayam',            '', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 10),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Ayam Ist',        '', 27000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 11),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Kambing',         '', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 12),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Kambing Ist',     '', 27000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 13),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Babat',           '', 25500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 14),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Babat Ist',       '', 27000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 15),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Seafood',         '', 27500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 16),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Seafood Ist',     '', 29000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 17),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Udang',           '', 26500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 18),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Udang Ist',       '', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 19),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Sapi',            '', 26500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 20),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Sapi Ist',        '', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 21),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Lada Hitam',      '', 27000, 'fa-bowl-rice', 'bg-stone-100',  NULL, true, 22),
+        (b_kerten, cat_nasgor, 'Nasi Goreng Lada Hitam Ist',  '', 28500, 'fa-bowl-rice', 'bg-stone-100',  NULL, true, 23);
 
     -- 2. MASAKAN DAGING AYAM (22 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_ayam, 'Ayam Teriyaki',            'Olahan daging ayam lembut dengan saus teriyaki manis gurih.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 24),
-        (b_kerten, cat_ayam, 'Ayam Gongso',              'Ayam tumis bumbu gongso kecap pedas manis khas Solo.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   'Favorit', true, 25),
-        (b_kerten, cat_ayam, 'Ayam Lada Hitam',          'Potongan daging ayam tumis saus lada hitam pekat.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 26),
-        (b_kerten, cat_ayam, 'Ayam Masak Kecap Pedas',   'Ayam masak bumbu kecap manis dengan sensasi pedas segar.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 27),
-        (b_kerten, cat_ayam, 'Ayam Goreng Mareme',       'Ayam goreng spesial racikan khas Mareme yang renyah dan gurih.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   'Best',    true, 28),
-        (b_kerten, cat_ayam, 'Ayam Goreng Asam Manis',   'Ayam goreng tepung renyah disiram saus asam manis segar.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   'Favorit', true, 29),
-        (b_kerten, cat_ayam, 'Ayam Goreng Mentega',      'Ayam goreng dimasak dengan saus mentega bawang putih harum.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   'Best',    true, 30),
-        (b_kerten, cat_ayam, 'Ayam Goreng Tepung',       'Potongan ayam goreng krispi berbalut tepung bumbu gurih.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 31),
-        (b_kerten, cat_ayam, 'Ayam Goreng Masak Tauco',  'Ayam goreng dimasak dengan bumbu tauco gurih khas.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 32),
-        (b_kerten, cat_ayam, 'Ayam Ca Jamur',            'Tumisan daging ayam lembut dengan jamur segar dan saus tiram.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 33),
-        (b_kerten, cat_ayam, 'Ayam Ca Kaylan',           'Tumisan daging ayam dengan sayur kaylan hijau segar.', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL,      true, 34),
-        (b_kerten, cat_ayam, 'Ayam Ca Kangkung',         'Tumisan daging ayam dengan kangkung segar bumbu bawang putih.', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL,      true, 35),
-        (b_kerten, cat_ayam, 'Ayam Ca Brokoli',          'Tumisan daging ayam dengan kuntum brokoli hijau renyah.', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL,      true, 36),
-        (b_kerten, cat_ayam, 'Ayam Sayur Asin Ca/Kuah',  'Olahan ayam dengan sawi asin segar, tersedia pilihan ca atau kuah.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 37),
-        (b_kerten, cat_ayam, 'Ayam Nanking',             'Hidangan ayam lapis klasik dengan siraman saus kental gurih.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 38),
-        (b_kerten, cat_ayam, 'Ayam Rebus',               'Ayam rebus lembut dengan minyak wijen dan bawang putih harum.', 30500, 'fa-drumstick-bite', 'bg-stone-100',  NULL,      true, 39),
-        (b_kerten, cat_ayam, 'Sayap Masak Kecap',        'Sayap ayam empuk dimasak bumbu kecap rempah meresap.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 40),
-        (b_kerten, cat_ayam, 'Bestik Ayam',              'Bestik daging ayam dengan kuah saus manis gurih khas Solo.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 41),
-        (b_kerten, cat_ayam, 'Ko Loo Kee',               'Ayam goreng tepung krispi dengan saus asam manis nanas.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   'Favorit', true, 42),
-        (b_kerten, cat_ayam, 'Ngo Yang Kee',             'Ayam olahan bumbu ngohiong rempah lima rasa yang khas.', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL,      true, 43),
-        (b_kerten, cat_ayam, 'Pak Lay Ca',               'Tumisan paklay segar dan sayuran bumbu gurih.', 30000, 'fa-bowl-food',      'bg-amber-50',   NULL,      true, 44),
-        (b_kerten, cat_ayam, 'Kulit Goreng',             'Kulit ayam goreng krispi dan gurih.', 30000, 'fa-drumstick-bite', 'bg-amber-50',   'Favorit', true, 45);
+        (b_kerten, cat_ayam, 'Ayam Teriyaki',           '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 24),
+        (b_kerten, cat_ayam, 'Ayam Gongso',             '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 25),
+        (b_kerten, cat_ayam, 'Ayam Lada Hitam',         '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 26),
+        (b_kerten, cat_ayam, 'Ayam Masak Kecap Pedas',  '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 27),
+        (b_kerten, cat_ayam, 'Ayam Goreng Mareme',      '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 28),
+        (b_kerten, cat_ayam, 'Ayam Goreng Asam Manis',  '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 29),
+        (b_kerten, cat_ayam, 'Ayam Goreng Mentega',     '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 30),
+        (b_kerten, cat_ayam, 'Ayam Goreng Tepung',      '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 31),
+        (b_kerten, cat_ayam, 'Ayam Goreng Masak Tauco', '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 32),
+        (b_kerten, cat_ayam, 'Ayam Ca Jamur',           '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 33),
+        (b_kerten, cat_ayam, 'Ayam Ca Kaylan',          '', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL, true, 34),
+        (b_kerten, cat_ayam, 'Ayam Ca Kangkung',        '', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL, true, 35),
+        (b_kerten, cat_ayam, 'Ayam Ca Brokoli',         '', 30500, 'fa-drumstick-bite', 'bg-emerald-50', NULL, true, 36),
+        (b_kerten, cat_ayam, 'Ayam Sayur Asin Ca/Kuah', '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 37),
+        (b_kerten, cat_ayam, 'Ayam Nanking',            '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 38),
+        (b_kerten, cat_ayam, 'Ayam Rebus',              '', 30500, 'fa-drumstick-bite', 'bg-stone-100',  NULL, true, 39),
+        (b_kerten, cat_ayam, 'Sayap Masak Kecap',       '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 40),
+        (b_kerten, cat_ayam, 'Bestik Ayam',             '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 41),
+        (b_kerten, cat_ayam, 'Ko Loo Kee',              '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 42),
+        (b_kerten, cat_ayam, 'Ngo Yang Kee',            '', 30500, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 43),
+        (b_kerten, cat_ayam, 'Pak Lay Ca',              '', 30000, 'fa-bowl-food',      'bg-amber-50',   NULL, true, 44),
+        (b_kerten, cat_ayam, 'Kulit Goreng',            '', 30000, 'fa-drumstick-bite', 'bg-amber-50',   NULL, true, 45);
 
     -- 3. ANEKA MASAKAN (30 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_masakan, 'Bakmi Goreng',           'Bakmi goreng bumbu khas Mareme dengan sayuran dan daging.', 25000, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 46),
-        (b_kerten, cat_masakan, 'Bakmi Godog',            'Bakmi kuah kaldu gurih hangat dengan telur dan sayuran.', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 47),
-        (b_kerten, cat_masakan, 'Bihun Goreng',           'Bihun goreng lembut berbumbu bawang putih dan kecap gurih.', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 48),
-        (b_kerten, cat_masakan, 'Bihun Godog',            'Bihun kuah kaldu hangat dengan sayuran segar.', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 49),
-        (b_kerten, cat_masakan, 'Capjay Goreng',          'Tumisan aneka sayuran segar dengan saus kental gurih.', 26500, 'fa-bowl-food', 'bg-emerald-50', 'Favorit', true, 50),
-        (b_kerten, cat_masakan, 'Capjay Godog',           'Capjay kuah hangat dengan aneka sayuran segar.', 26500, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 51),
-        (b_kerten, cat_masakan, 'Nasi Ayam Ca',           'Nasi putih hangat disajikan dengan tumisan ayam ca gurih.', 27500, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 52),
-        (b_kerten, cat_masakan, 'Nasi Campur',            'Nasi dengan aneka lauk pendamping spesial khas Mareme.', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL,      true, 53),
-        (b_kerten, cat_masakan, 'Nasi Putih',             'Nasi putih pulen hangat per porsi.', 5000,  'fa-bowl-rice', 'bg-stone-100',  NULL,      true, 54),
-        (b_kerten, cat_masakan, 'Masak Tahu',             'Olahan tahu lembut dengan sayuran dan bumbu gurih.', 28000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 55),
-        (b_kerten, cat_masakan, 'Tahu Masak Kecap',       'Tahu goreng lembut dimasak dengan bumbu kecap manis gurih.', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 56),
-        (b_kerten, cat_masakan, 'Misoa Kuah',             'Misoa lembut dalam kuah kaldu hangat yang menenangkan.', 27500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 57),
-        (b_kerten, cat_masakan, 'Mun Tahu',               'Tahu sutra cincang dalam kuah kental gurih hangat.', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 58),
-        (b_kerten, cat_masakan, 'Angsio Tahu',            'Tahu Jepang lembut dimasak saus angsio kecokelatan yang lezat.', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 59),
-        (b_kerten, cat_masakan, 'Sapo Tahu',              'Tahu Jepang, sayuran, dan seafood dalam kuah sapo kental hangat.', 33000, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 60),
-        (b_kerten, cat_masakan, 'Soon Goreng',            'Soun goreng kenyal berbumbu gurih dengan sayuran.', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 61),
-        (b_kerten, cat_masakan, 'Ta Mie Goreng',          'Mie kering renyah disiram kuah kental sayuran dan daging.', 26500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 62),
-        (b_kerten, cat_masakan, 'Yam Yien',               'Mie olahan khas dengan bumbu gurih.', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 63),
-        (b_kerten, cat_masakan, 'Aneka Sayur',            'Tumisan aneka sayuran hijau segar.', 24000, 'fa-leaf',      'bg-emerald-50', NULL,      true, 64),
-        (b_kerten, cat_masakan, 'Fuyung Hay',             'Telur dadar tebal berisi sayuran dan daging dengan saus asam manis.', 27500, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 65),
-        (b_kerten, cat_masakan, 'Kay Lan Ca Polos',       'Tumis sayur kaylan segar dengan bawang putih.', 24000, 'fa-leaf',      'bg-emerald-50', NULL,      true, 66),
-        (b_kerten, cat_masakan, 'Kangkung Ca Polos',      'Tumis kangkung segar bawang putih dengan aroma wok.', 24000, 'fa-leaf',      'bg-emerald-50', NULL,      true, 67),
-        (b_kerten, cat_masakan, 'Kwee Tiauw Goreng/Kuah', 'Kwetiau lembut dimasak goreng atau kuah sesuai selera.', 25500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 68),
-        (b_kerten, cat_masakan, 'Kwee Tiauw Nyemek',      'Kwetiau dengan kuah nyemek kental gurih khas.', 25500, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 69),
-        (b_kerten, cat_masakan, 'Kamar Bola',             'Olahan bola daging/udang goreng dengan saus khas.', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 70),
-        (b_kerten, cat_masakan, 'Loo Mie',                'Mie tebal dalam kuah kental gurih kaya rasa.', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 71),
-        (b_kerten, cat_masakan, 'Brokoli Polos',          'Tumis brokoli hijau segar dengan saus bawang putih.', 24500, 'fa-leaf',      'bg-emerald-50', NULL,      true, 72),
-        (b_kerten, cat_masakan, 'Babat Gongso',           'Babat empuk dimasak bumbu gongso kecap pedas manis.', 28500, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 73),
-        (b_kerten, cat_masakan, 'Orak Arik',              'Tumisan telur orak-arik dengan sayuran segar gurih.', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 74),
-        (b_kerten, cat_masakan, 'Nasi Capjay',            'Nasi putih hangat disajikan bersama capjay sayuran segar.', 25500, 'fa-bowl-rice', 'bg-emerald-50', NULL,      true, 75);
+        (b_kerten, cat_masakan, 'Bakmi Goreng',           '', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 46),
+        (b_kerten, cat_masakan, 'Bakmi Godog',            '', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 47),
+        (b_kerten, cat_masakan, 'Bihun Goreng',           '', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 48),
+        (b_kerten, cat_masakan, 'Bihun Godog',            '', 25000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 49),
+        (b_kerten, cat_masakan, 'Capjay Goreng',          '', 26500, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 50),
+        (b_kerten, cat_masakan, 'Capjay Godog',           '', 26500, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 51),
+        (b_kerten, cat_masakan, 'Nasi Ayam Ca',           '', 27500, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 52),
+        (b_kerten, cat_masakan, 'Nasi Campur',            '', 28000, 'fa-bowl-rice', 'bg-amber-50',   NULL, true, 53),
+        (b_kerten, cat_masakan, 'Nasi Putih',             '', 5000,  'fa-bowl-rice', 'bg-stone-100',  NULL, true, 54),
+        (b_kerten, cat_masakan, 'Masak Tahu',             '', 28000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 55),
+        (b_kerten, cat_masakan, 'Tahu Masak Kecap',       '', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 56),
+        (b_kerten, cat_masakan, 'Misoa Kuah',             '', 27500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 57),
+        (b_kerten, cat_masakan, 'Mun Tahu',               '', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 58),
+        (b_kerten, cat_masakan, 'Angsio Tahu',            '', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 59),
+        (b_kerten, cat_masakan, 'Sapo Tahu',              '', 33000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 60),
+        (b_kerten, cat_masakan, 'Soon Goreng',            '', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 61),
+        (b_kerten, cat_masakan, 'Ta Mie Goreng',          '', 26500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 62),
+        (b_kerten, cat_masakan, 'Yam Yien',               '', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 63),
+        (b_kerten, cat_masakan, 'Aneka Sayur',            '', 24000, 'fa-leaf',      'bg-emerald-50', NULL, true, 64),
+        (b_kerten, cat_masakan, 'Fuyung Hay',             '', 27500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 65),
+        (b_kerten, cat_masakan, 'Kay Lan Ca Polos',       '', 24000, 'fa-leaf',      'bg-emerald-50', NULL, true, 66),
+        (b_kerten, cat_masakan, 'Kangkung Ca Polos',      '', 24000, 'fa-leaf',      'bg-emerald-50', NULL, true, 67),
+        (b_kerten, cat_masakan, 'Kwee Tiauw Goreng/Kuah', '', 25500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 68),
+        (b_kerten, cat_masakan, 'Kwee Tiauw Nyemek',      '', 25500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 69),
+        (b_kerten, cat_masakan, 'Kamar Bola',             '', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 70),
+        (b_kerten, cat_masakan, 'Loo Mie',                '', 27000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 71),
+        (b_kerten, cat_masakan, 'Brokoli Polos',          '', 24500, 'fa-leaf',      'bg-emerald-50', NULL, true, 72),
+        (b_kerten, cat_masakan, 'Babat Gongso',           '', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 73),
+        (b_kerten, cat_masakan, 'Orak Arik',              '', 28500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 74),
+        (b_kerten, cat_masakan, 'Nasi Capjay',            '', 25500, 'fa-bowl-rice', 'bg-emerald-50', NULL, true, 75);
 
     -- 4. ANEKA SOUP (5 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_soup, 'Soup Asparagus Kepiting', 'Sup kental hangat perpaduan asparagus lembut dan daging kepiting.', 43500, 'fa-bowl-food', 'bg-amber-50', 'Best', true, 76),
-        (b_kerten, cat_soup, 'Soup ShangHay',           'Sup hangat ala Shanghai dengan isian lengkap dan kuah gurih.', 34500, 'fa-bowl-food', 'bg-amber-50', NULL,   true, 77),
-        (b_kerten, cat_soup, 'Soup Ayam',               'Sup kaldu ayam bening hangat yang gurih dan menyegarkan.', 30500, 'fa-bowl-food', 'bg-amber-50', NULL,   true, 78),
-        (b_kerten, cat_soup, 'Soup Tahu Sayur Asin',    'Sup segar berisi tahu lembut dan sawi asin pilihan.', 30500, 'fa-bowl-food', 'bg-amber-50', NULL,   true, 79),
-        (b_kerten, cat_soup, 'Soup Sapi',               'Sup irisan daging sapi empuk dalam kuah kaldu hangat.', 31000, 'fa-bowl-food', 'bg-amber-50', NULL,   true, 80);
+        (b_kerten, cat_soup, 'Soup Asparagus Kepiting', '', 43500, 'fa-bowl-food', 'bg-amber-50', NULL, true, 76),
+        (b_kerten, cat_soup, 'Soup ShangHay',           '', 34500, 'fa-bowl-food', 'bg-amber-50', NULL, true, 77),
+        (b_kerten, cat_soup, 'Soup Ayam',               '', 30500, 'fa-bowl-food', 'bg-amber-50', NULL, true, 78),
+        (b_kerten, cat_soup, 'Soup Tahu Sayur Asin',    '', 30500, 'fa-bowl-food', 'bg-amber-50', NULL, true, 79),
+        (b_kerten, cat_soup, 'Soup Sapi',               '', 31000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 80);
 
     -- 5. MASAKAN TELUR ASIN (4 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_telurasin, 'Ayam Telur Asin',   'Ayam goreng tepung renyah dibalut saus telur asin creamy gurih.', 37500, 'fa-drumstick-bite', 'bg-amber-50', 'Best',    true, 81),
-        (b_kerten, cat_telurasin, 'Cumi Telur Asin',   'Cumi goreng krispi dengan balutan saus telur asin gurih.', 37500, 'fa-bowl-food',      'bg-amber-50', 'Favorit', true, 82),
-        (b_kerten, cat_telurasin, 'Udang Telur Asin',  'Udang goreng renyah dimasak dengan saus kuning telur asin.', 37500, 'fa-bowl-food',      'bg-amber-50', NULL,      true, 83),
-        (b_kerten, cat_telurasin, 'Gurame Telur Asin', 'Fillet ikan gurame krispi berbalut saus telur asin spesial.', 37500, 'fa-fish',           'bg-amber-50', NULL,      true, 84);
+        (b_kerten, cat_telurasin, 'Ayam Telur Asin',   '', 37500, 'fa-drumstick-bite', 'bg-amber-50', NULL, true, 81),
+        (b_kerten, cat_telurasin, 'Cumi Telur Asin',   '', 37500, 'fa-bowl-food',      'bg-amber-50', NULL, true, 82),
+        (b_kerten, cat_telurasin, 'Udang Telur Asin',  '', 37500, 'fa-bowl-food',      'bg-amber-50', NULL, true, 83),
+        (b_kerten, cat_telurasin, 'Gurame Telur Asin', '', 37500, 'fa-fish',           'bg-amber-50', NULL, true, 84);
 
     -- 6. MASAKAN GURAME (9 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_gurame, 'Soup Gurame Kuah Sayur Asin', 'Sup ikan gurame segar dalam kuah sayur asin hangat.', 34500, 'fa-fish', 'bg-amber-50', 'Favorit', true, 85),
-        (b_kerten, cat_gurame, 'Gurame Goreng Mareme',        'Ikan gurame goreng renyah dengan bumbu spesial khas Mareme.', 30500, 'fa-fish', 'bg-amber-50', 'Best',    true, 86),
-        (b_kerten, cat_gurame, 'Gurame Goreng Asam Manis',    'Gurame goreng krispi disiram saus asam manis segar.', 30500, 'fa-fish', 'bg-amber-50', 'Favorit', true, 87),
-        (b_kerten, cat_gurame, 'Gurame Goreng Mentega',       'Gurame goreng dimasak dengan saus mentega harum.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 88),
-        (b_kerten, cat_gurame, 'Gurame Goreng Tepung',        'Fillet gurame goreng berbalut tepung krispi gurih.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 89),
-        (b_kerten, cat_gurame, 'Gurame Masak Tauco',          'Ikan gurame dimasak dengan bumbu tauco rempah gurih.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 90),
-        (b_kerten, cat_gurame, 'Gurame Masak Kecap',          'Gurame goreng dimasak bumbu kecap manis pedas gurih.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 91),
-        (b_kerten, cat_gurame, 'Gurame Gongso',               'Olahan gurame bumbu gongso pedas manis khas Solo.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 92),
-        (b_kerten, cat_gurame, 'Gurame Oven Garam',           'Ikan gurame panggang oven garam gurih khas.', 30500, 'fa-fish', 'bg-amber-50', NULL,      true, 93);
+        (b_kerten, cat_gurame, 'Soup Gurame Kuah Sayur Asin', '', 34500, 'fa-fish', 'bg-amber-50', NULL, true, 85),
+        (b_kerten, cat_gurame, 'Gurame Goreng Mareme',        '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 86),
+        (b_kerten, cat_gurame, 'Gurame Goreng Asam Manis',    '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 87),
+        (b_kerten, cat_gurame, 'Gurame Goreng Mentega',       '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 88),
+        (b_kerten, cat_gurame, 'Gurame Goreng Tepung',        '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 89),
+        (b_kerten, cat_gurame, 'Gurame Masak Tauco',          '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 90),
+        (b_kerten, cat_gurame, 'Gurame Masak Kecap',          '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 91),
+        (b_kerten, cat_gurame, 'Gurame Gongso',               '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 92),
+        (b_kerten, cat_gurame, 'Gurame Oven Garam',           '', 30500, 'fa-fish', 'bg-amber-50', NULL, true, 93);
 
     -- 7. MASAKAN UDANG (11 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_udang, 'Udang Bago Spesial',      'Udang bago ukuran spesial dimasak bumbu khas Mareme.', 33000, 'fa-shrimp', 'bg-amber-50',   'Best',    true, 94),
-        (b_kerten, cat_udang, 'Udang Bago Mentega',      'Udang bago segar dimasak saus mentega bawang putih.', 31000, 'fa-shrimp', 'bg-amber-50',   'Favorit', true, 95),
-        (b_kerten, cat_udang, 'Udang Goreng Mareme',     'Udang goreng renyah racikan spesial khas Mareme.', 30500, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 96),
-        (b_kerten, cat_udang, 'Udang Goreng Asam Manis', 'Udang goreng tepung disiram saus asam manis segar.', 30500, 'fa-shrimp', 'bg-amber-50',   'Favorit', true, 97),
-        (b_kerten, cat_udang, 'Udang Goreng Mentega',    'Udang goreng dengan balutan saus mentega gurih.', 30500, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 98),
-        (b_kerten, cat_udang, 'Udang Goreng Tepung',     'Udang segar goreng tepung krispi keemasan.', 30500, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 99),
-        (b_kerten, cat_udang, 'Udang Gr Masak Tauco',    'Udang goreng dimasak dengan bumbu tauco harum.', 30500, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 100),
-        (b_kerten, cat_udang, 'Udang Ca Sayur',          'Tumisan udang segar dengan aneka sayuran hijau.', 30500, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 101),
-        (b_kerten, cat_udang, 'Udang Ca Jamur',          'Tumisan udang segar dengan jamur lembut bumbu tiram.', 30500, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 102),
-        (b_kerten, cat_udang, 'Udang Ca Kay Lan',        'Tumisan udang segar dengan sayur kaylan renyah.', 30500, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 103),
-        (b_kerten, cat_udang, 'Udang Ca Kangkung',       'Tumisan udang segar dengan kangkung bawang putih.', 30500, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 104);
+        (b_kerten, cat_udang, 'Udang Bago Spesial',      '', 33000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 94),
+        (b_kerten, cat_udang, 'Udang Bago Mentega',      '', 31000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 95),
+        (b_kerten, cat_udang, 'Udang Goreng Mareme',     '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 96),
+        (b_kerten, cat_udang, 'Udang Goreng Asam Manis', '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 97),
+        (b_kerten, cat_udang, 'Udang Goreng Mentega',    '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 98),
+        (b_kerten, cat_udang, 'Udang Goreng Tepung',     '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 99),
+        (b_kerten, cat_udang, 'Udang Gr Masak Tauco',    '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 100),
+        (b_kerten, cat_udang, 'Udang Ca Sayur',          '', 30500, 'fa-shrimp', 'bg-emerald-50', NULL, true, 101),
+        (b_kerten, cat_udang, 'Udang Ca Jamur',          '', 30500, 'fa-shrimp', 'bg-amber-50',   NULL, true, 102),
+        (b_kerten, cat_udang, 'Udang Ca Kay Lan',        '', 30500, 'fa-shrimp', 'bg-emerald-50', NULL, true, 103),
+        (b_kerten, cat_udang, 'Udang Ca Kangkung',       '', 30500, 'fa-shrimp', 'bg-emerald-50', NULL, true, 104);
 
     -- 8. MASAKAN DAGING SAPI (9 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_sapi, 'Sapi Teriyaki',    'Irisan daging sapi empuk dimasak saus teriyaki manis gurih.', 31000, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 105),
-        (b_kerten, cat_sapi, 'Kambing Teriyaki', 'Olahan daging kambing empuk dengan saus teriyaki spesial.', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 106),
-        (b_kerten, cat_sapi, 'Sapi Ca Sayur',    'Tumisan irisan daging sapi dengan aneka sayuran segar.', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 107),
-        (b_kerten, cat_sapi, 'Sapi Ca Jamur',    'Tumisan daging sapi empuk dengan jamur segar.', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 108),
-        (b_kerten, cat_sapi, 'Sapi Ca Kaylan',   'Tumisan daging sapi dengan sayur kaylan hijau renyah.', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 109),
-        (b_kerten, cat_sapi, 'Sapi Ca Kangkung', 'Tumisan daging sapi empuk dengan sayur kangkung.', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 110),
-        (b_kerten, cat_sapi, 'Sapi Ca Brokoli',  'Tumisan daging sapi dengan brokoli segar saus tiram.', 31000, 'fa-bowl-food', 'bg-emerald-50', 'Favorit', true, 111),
-        (b_kerten, cat_sapi, 'Sapi Lada Hitam',  'Irisan daging sapi empuk tumis saus lada hitam hangat.', 31000, 'fa-bowl-food', 'bg-stone-100',  'Best',    true, 112),
-        (b_kerten, cat_sapi, 'Bestik Sapi',      'Bestik daging sapi empuk dengan kuah saus manis gurih khas Solo.', 31000, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 113);
+        (b_kerten, cat_sapi, 'Sapi Teriyaki',    '', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 105),
+        (b_kerten, cat_sapi, 'Kambing Teriyaki', '', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 106),
+        (b_kerten, cat_sapi, 'Sapi Ca Sayur',    '', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 107),
+        (b_kerten, cat_sapi, 'Sapi Ca Jamur',    '', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 108),
+        (b_kerten, cat_sapi, 'Sapi Ca Kaylan',   '', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 109),
+        (b_kerten, cat_sapi, 'Sapi Ca Kangkung', '', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 110),
+        (b_kerten, cat_sapi, 'Sapi Ca Brokoli',  '', 31000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 111),
+        (b_kerten, cat_sapi, 'Sapi Lada Hitam',  '', 31000, 'fa-bowl-food', 'bg-stone-100',  NULL, true, 112),
+        (b_kerten, cat_sapi, 'Bestik Sapi',      '', 31000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 113);
 
     -- 9. MASAKAN CUMI (6 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_cumi, 'Cumi Goreng Mareme',     'Cumi goreng renyah berbumbu spesial khas Mareme.', 30500, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 114),
-        (b_kerten, cat_cumi, 'Cumi Goreng Asam Manis', 'Cumi goreng tepung renyah dengan saus asam manis segar.', 30500, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 115),
-        (b_kerten, cat_cumi, 'Cumi Goreng Mentega',    'Cumi goreng dimasak dengan saus mentega gurih harum.', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 116),
-        (b_kerten, cat_cumi, 'Cumi Goreng Tepung',     'Cincin cumi segar berbalut tepung krispi gurih.', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 117),
-        (b_kerten, cat_cumi, 'Cumi Ca Sayur',          'Tumisan cumi segar dengan aneka sayuran hijau.', 30500, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 118),
-        (b_kerten, cat_cumi, 'Cumi Ca Jamur',          'Tumisan cumi segar dengan jamur kancing lembut.', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 119);
+        (b_kerten, cat_cumi, 'Cumi Goreng Mareme',     '', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 114),
+        (b_kerten, cat_cumi, 'Cumi Goreng Asam Manis', '', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 115),
+        (b_kerten, cat_cumi, 'Cumi Goreng Mentega',    '', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 116),
+        (b_kerten, cat_cumi, 'Cumi Goreng Tepung',     '', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 117),
+        (b_kerten, cat_cumi, 'Cumi Ca Sayur',          '', 30500, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 118),
+        (b_kerten, cat_cumi, 'Cumi Ca Jamur',          '', 30500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 119);
 
     -- 10. MINUMAN (19 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_kerten, cat_minuman, 'Es Pelangi',             'Minuman es segar warna-warni manis menyegarkan.', 8000,  'fa-glass-water', 'bg-pink-50',    'Favorit', true, 120),
-        (b_kerten, cat_minuman, 'Lemon Tea',              'Teh hangat dengan perasan jeruk lemon segar.', 6500,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 121),
-        (b_kerten, cat_minuman, 'Wedang Teh Tawar',       'Teh seduh hangat melati khas Solo tanpa gula.', 3000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 122),
-        (b_kerten, cat_minuman, 'Wedang Teh Manis',       'Teh seduh hangat manis khas Solo.', 4000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 123),
-        (b_kerten, cat_minuman, 'Wedang Jeruk',           'Minuman jeruk peras hangat manis segar.', 6500,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 124),
-        (b_kerten, cat_minuman, 'Wedang Kopi',            'Kopi hitam seduh hangat harum.', 6000,  'fa-mug-hot',     'bg-stone-100',  NULL,      true, 125),
-        (b_kerten, cat_minuman, 'Wedang Kopi Susu',       'Kopi seduh hangat berpadu susu manis legit.', 9000,  'fa-mug-saucer',  'bg-amber-50',   NULL,      true, 126),
-        (b_kerten, cat_minuman, 'Es Teh Tawar',           'Es teh melati segar tanpa gula.', 3000,  'fa-glass-water', 'bg-amber-50',   NULL,      true, 127),
-        (b_kerten, cat_minuman, 'Es Teh Manis',           'Es teh manis segar khas Solo.', 4000,  'fa-glass-water', 'bg-amber-50',   'Best',    true, 128),
-        (b_kerten, cat_minuman, 'Es Hijau',               'Minuman es sirup hijau manis dan segar.', 8000,  'fa-glass-water', 'bg-emerald-50', NULL,      true, 129),
-        (b_kerten, cat_minuman, 'Es Kopi',                'Es kopi hitam dingin menyegarkan.', 7000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 130),
-        (b_kerten, cat_minuman, 'Es Kopi Susu',           'Es kopi susu manis dingin yang creamy.', 9000,  'fa-mug-saucer',  'bg-amber-50',   'Favorit', true, 131),
-        (b_kerten, cat_minuman, 'Es Jeruk',               'Es jeruk peras segar manis alami.', 7000,  'fa-glass-water', 'bg-amber-50',   'Best',    true, 132),
-        (b_kerten, cat_minuman, 'Es Sirup',               'Minuman es sirup manis segar.', 5500,  'fa-glass-water', 'bg-pink-50',    NULL,      true, 133),
-        (b_kerten, cat_minuman, 'Es Lemon Tea',           'Es teh segar dengan perasan jeruk lemon.', 6500,  'fa-glass-water', 'bg-amber-50',   'Favorit', true, 134),
-        (b_kerten, cat_minuman, 'Es Soda Gembira',        'Perpaduan soda dingin, susu kental manis, dan sirup segar.', 12000, 'fa-glass-water', 'bg-pink-50',    'Favorit', true, 135),
-        (b_kerten, cat_minuman, 'Es Batu',                'Tambahan es batu kristal bersih.', 1000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 136),
-        (b_kerten, cat_minuman, 'Coca Cola/Sprite/Fanta', 'Minuman ringan berkarbonasi dingin (pilih di catatan).', 6000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 137),
-        (b_kerten, cat_minuman, 'Air Mineral',            'Air mineral kemasan botol.', 5000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 138);
+        (b_kerten, cat_minuman, 'Es Pelangi',             '', 8000,  'fa-glass-water', 'bg-pink-50',    NULL, true, 120),
+        (b_kerten, cat_minuman, 'Lemon Tea',              '', 6500,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 121),
+        (b_kerten, cat_minuman, 'Wedang Teh Tawar',       '', 3000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 122),
+        (b_kerten, cat_minuman, 'Wedang Teh Manis',       '', 4000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 123),
+        (b_kerten, cat_minuman, 'Wedang Jeruk',           '', 6500,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 124),
+        (b_kerten, cat_minuman, 'Wedang Kopi',            '', 6000,  'fa-mug-hot',     'bg-stone-100',  NULL, true, 125),
+        (b_kerten, cat_minuman, 'Wedang Kopi Susu',       '', 9000,  'fa-mug-saucer',  'bg-amber-50',   NULL, true, 126),
+        (b_kerten, cat_minuman, 'Es Teh Tawar',           '', 3000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 127),
+        (b_kerten, cat_minuman, 'Es Teh Manis',           '', 4000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 128),
+        (b_kerten, cat_minuman, 'Es Hijau',               '', 8000,  'fa-glass-water', 'bg-emerald-50', NULL, true, 129),
+        (b_kerten, cat_minuman, 'Es Kopi',                '', 7000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 130),
+        (b_kerten, cat_minuman, 'Es Kopi Susu',           '', 9000,  'fa-mug-saucer',  'bg-amber-50',   NULL, true, 131),
+        (b_kerten, cat_minuman, 'Es Jeruk',               '', 7000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 132),
+        (b_kerten, cat_minuman, 'Es Sirup',               '', 5500,  'fa-glass-water', 'bg-pink-50',    NULL, true, 133),
+        (b_kerten, cat_minuman, 'Es Lemon Tea',           '', 6500,  'fa-glass-water', 'bg-amber-50',   NULL, true, 134),
+        (b_kerten, cat_minuman, 'Es Soda Gembira',        '', 12000, 'fa-glass-water', 'bg-pink-50',    NULL, true, 135),
+        (b_kerten, cat_minuman, 'Es Batu',                '', 1000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 136),
+        (b_kerten, cat_minuman, 'Coca Cola/Sprite/Fanta', '', 6000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 137),
+        (b_kerten, cat_minuman, 'Air Mineral',            '', 5000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 138);
 
     -- =========================================================================
     -- OUTLET 2: MAK DJAN (64 items from Mak Djan menu)
@@ -241,92 +242,92 @@ BEGIN
     -- 1. MASAKAN TELOR ASIN (4 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_telurasin, 'Gurame Grng Telor Asin', 'Fillet ikan gurame krispi berbalut saus telor asin spesial Mak Djan.', 36000, 'fa-fish',           'bg-amber-50', 'Favorit', true, 1),
-        (b_makdjan, cat_telurasin, 'Ayam Grng Telor Asin',   'Ayam goreng tepung renyah dibalut saus telor asin gurih.', 36000, 'fa-drumstick-bite', 'bg-amber-50', 'Best',    true, 2),
-        (b_makdjan, cat_telurasin, 'Udang Grng Telor Asin',  'Udang goreng renyah dimasak dengan saus kuning telor asin.', 36000, 'fa-shrimp',         'bg-amber-50', NULL,      true, 3),
-        (b_makdjan, cat_telurasin, 'Cumi Grng Telor Asin',   'Cumi goreng krispi dengan balutan saus telor asin gurih.', 36000, 'fa-bowl-food',      'bg-amber-50', 'Favorit', true, 4);
+        (b_makdjan, cat_telurasin, 'Gurame Grng Telor Asin', '', 36000, 'fa-fish',           'bg-amber-50', NULL, true, 1),
+        (b_makdjan, cat_telurasin, 'Ayam Grng Telor Asin',   '', 36000, 'fa-drumstick-bite', 'bg-amber-50', NULL, true, 2),
+        (b_makdjan, cat_telurasin, 'Udang Grng Telor Asin',  '', 36000, 'fa-shrimp',         'bg-amber-50', NULL, true, 3),
+        (b_makdjan, cat_telurasin, 'Cumi Grng Telor Asin',   '', 36000, 'fa-bowl-food',      'bg-amber-50', NULL, true, 4);
 
     -- 2. MASAKAN SAPI (10 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_sapi, 'Sapi Ca Sayur',    'Tumisan irisan daging sapi empuk dengan aneka sayuran segar.', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 5),
-        (b_makdjan, cat_sapi, 'Sapi Ca Jamur',    'Tumisan daging sapi empuk dengan jamur segar saus tiram.', 30000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 6),
-        (b_makdjan, cat_sapi, 'Sapi Ca Kaylan',   'Tumisan daging sapi dengan sayur kaylan hijau renyah.', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 7),
-        (b_makdjan, cat_sapi, 'Sapi Ca Kangkung', 'Tumisan daging sapi empuk dengan sayur kangkung bawang putih.', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 8),
-        (b_makdjan, cat_sapi, 'Sapi Ca Brokoli',  'Tumisan daging sapi dengan brokoli segar saus gurih.', 30000, 'fa-bowl-food', 'bg-emerald-50', 'Favorit', true, 9),
-        (b_makdjan, cat_sapi, 'Sapi Lada Hitam',  'Irisan daging sapi empuk tumis saus lada hitam hangat.', 30000, 'fa-bowl-food', 'bg-stone-100',  'Best',    true, 10),
-        (b_makdjan, cat_sapi, 'Sapi Masak Jahe',  'Irisan daging sapi dimasak dengan irisan jahe hangat dan harum.', 32000, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 11),
-        (b_makdjan, cat_sapi, 'Sapi Teriyaki',    'Irisan daging sapi empuk dimasak saus teriyaki manis gurih.', 30000, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 12),
-        (b_makdjan, cat_sapi, 'Bestik Sapi',      'Bestik daging sapi empuk dengan kuah saus manis gurih khas Solo.', 30000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 13),
-        (b_makdjan, cat_sapi, 'Babat Gongso',     'Babat empuk dimasak bumbu gongso kecap pedas manis khas Mak Djan.', 25500, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 14);
+        (b_makdjan, cat_sapi, 'Sapi Ca Sayur',    '', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 5),
+        (b_makdjan, cat_sapi, 'Sapi Ca Jamur',    '', 30000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 6),
+        (b_makdjan, cat_sapi, 'Sapi Ca Kaylan',   '', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 7),
+        (b_makdjan, cat_sapi, 'Sapi Ca Kangkung', '', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 8),
+        (b_makdjan, cat_sapi, 'Sapi Ca Brokoli',  '', 30000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 9),
+        (b_makdjan, cat_sapi, 'Sapi Lada Hitam',  '', 30000, 'fa-bowl-food', 'bg-stone-100',  NULL, true, 10),
+        (b_makdjan, cat_sapi, 'Sapi Masak Jahe',  '', 32000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 11),
+        (b_makdjan, cat_sapi, 'Sapi Teriyaki',    '', 30000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 12),
+        (b_makdjan, cat_sapi, 'Bestik Sapi',      '', 30000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 13),
+        (b_makdjan, cat_sapi, 'Babat Gongso',     '', 25500, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 14);
 
     -- 3. MASAKAN GURAME (9 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_gurame, 'Sup Gurame Kuah Sayur Asin', 'Sup ikan gurame segar dalam kuah sayur asin hangat.', 33000, 'fa-fish', 'bg-amber-50', 'Favorit', true, 15),
-        (b_makdjan, cat_gurame, 'Gurame Oven Garam',          'Ikan gurame panggang oven garam gurih khas Mak Djan.', 32000, 'fa-fish', 'bg-amber-50', 'Favorit', true, 16),
-        (b_makdjan, cat_gurame, 'Gurame Goreng Mak Djan',     'Ikan gurame goreng renyah dengan bumbu spesial khas Mak Djan.', 29000, 'fa-fish', 'bg-amber-50', 'Best',    true, 17),
-        (b_makdjan, cat_gurame, 'Gurame Goreng Asam Manis',   'Gurame goreng krispi disiram saus asam manis segar.', 29000, 'fa-fish', 'bg-amber-50', 'Favorit', true, 18),
-        (b_makdjan, cat_gurame, 'Gurame Goreng Mentega',      'Gurame goreng dimasak dengan saus mentega harum.', 29000, 'fa-fish', 'bg-amber-50', NULL,      true, 19),
-        (b_makdjan, cat_gurame, 'Gurame Goreng Tepung',       'Fillet gurame goreng berbalut tepung krispi gurih.', 29000, 'fa-fish', 'bg-amber-50', NULL,      true, 20),
-        (b_makdjan, cat_gurame, 'Gurame Masak Taoco',         'Ikan gurame dimasak dengan bumbu taoco rempah gurih.', 29000, 'fa-fish', 'bg-amber-50', NULL,      true, 21),
-        (b_makdjan, cat_gurame, 'Gurame Masak Kecap',         'Gurame goreng dimasak bumbu kecap manis pedas gurih.', 29000, 'fa-fish', 'bg-amber-50', NULL,      true, 22),
-        (b_makdjan, cat_gurame, 'Gurame Gongso',              'Olahan gurame bumbu gongso pedas manis khas Solo.', 29000, 'fa-fish', 'bg-amber-50', NULL,      true, 23);
+        (b_makdjan, cat_gurame, 'Sup Gurame Kuah Sayur Asin', '', 33000, 'fa-fish', 'bg-amber-50', NULL, true, 15),
+        (b_makdjan, cat_gurame, 'Gurame Oven Garam',          '', 32000, 'fa-fish', 'bg-amber-50', NULL, true, 16),
+        (b_makdjan, cat_gurame, 'Gurame Goreng Mak Djan',     '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 17),
+        (b_makdjan, cat_gurame, 'Gurame Goreng Asam Manis',   '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 18),
+        (b_makdjan, cat_gurame, 'Gurame Goreng Mentega',      '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 19),
+        (b_makdjan, cat_gurame, 'Gurame Goreng Tepung',       '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 20),
+        (b_makdjan, cat_gurame, 'Gurame Masak Taoco',         '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 21),
+        (b_makdjan, cat_gurame, 'Gurame Masak Kecap',         '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 22),
+        (b_makdjan, cat_gurame, 'Gurame Gongso',              '', 29000, 'fa-fish', 'bg-amber-50', NULL, true, 23);
 
     -- 4. MASAKAN CUMI (6 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_cumi, 'Cumi Goreng Mak Djan',   'Cumi goreng renyah berbumbu spesial khas Mak Djan.', 29000, 'fa-bowl-food', 'bg-amber-50',   'Best',    true, 24),
-        (b_makdjan, cat_cumi, 'Cumi Goreng Asam Manis', 'Cumi goreng tepung renyah dengan saus asam manis segar.', 29000, 'fa-bowl-food', 'bg-amber-50',   'Favorit', true, 25),
-        (b_makdjan, cat_cumi, 'Cumi Goreng Mentega',    'Cumi goreng dimasak dengan saus mentega gurih harum.', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 26),
-        (b_makdjan, cat_cumi, 'Cumi Goreng Tepung',     'Cincin cumi segar berbalut tepung krispi gurih.', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 27),
-        (b_makdjan, cat_cumi, 'Cumi Ca Sayur',          'Tumisan cumi segar dengan aneka sayuran hijau.', 29000, 'fa-bowl-food', 'bg-emerald-50', NULL,      true, 28),
-        (b_makdjan, cat_cumi, 'Cumi Ca Jamur',          'Tumisan cumi segar dengan jamur lembut.', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL,      true, 29);
+        (b_makdjan, cat_cumi, 'Cumi Goreng Mak Djan',   '', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 24),
+        (b_makdjan, cat_cumi, 'Cumi Goreng Asam Manis', '', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 25),
+        (b_makdjan, cat_cumi, 'Cumi Goreng Mentega',    '', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 26),
+        (b_makdjan, cat_cumi, 'Cumi Goreng Tepung',     '', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 27),
+        (b_makdjan, cat_cumi, 'Cumi Ca Sayur',          '', 29000, 'fa-bowl-food', 'bg-emerald-50', NULL, true, 28),
+        (b_makdjan, cat_cumi, 'Cumi Ca Jamur',          '', 29000, 'fa-bowl-food', 'bg-amber-50',   NULL, true, 29);
 
     -- 5. MASAKAN UDANG (11 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_udang, 'Udang Bago Spesial',      'Udang bago ukuran spesial dimasak bumbu khas Mak Djan.', 32000, 'fa-shrimp', 'bg-amber-50',   'Best',    true, 30),
-        (b_makdjan, cat_udang, 'Udang Bago Grng Mentega', 'Udang bago segar goreng saus mentega bawang putih.', 30000, 'fa-shrimp', 'bg-amber-50',   'Favorit', true, 31),
-        (b_makdjan, cat_udang, 'Udang Goreng Mak Djan',   'Udang goreng renyah racikan spesial khas Mak Djan.', 29000, 'fa-shrimp', 'bg-amber-50',   'Best',    true, 32),
-        (b_makdjan, cat_udang, 'Udang Goreng Asam Manis', 'Udang goreng tepung disiram saus asam manis segar.', 29000, 'fa-shrimp', 'bg-amber-50',   'Favorit', true, 33),
-        (b_makdjan, cat_udang, 'Udang Goreng Mentega',    'Udang goreng dengan balutan saus mentega gurih.', 29000, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 34),
-        (b_makdjan, cat_udang, 'Udang Goreng Tepung',     'Udang segar goreng tepung krispi keemasan.', 29000, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 35),
-        (b_makdjan, cat_udang, 'Udang Goreng Masak Taoco','Udang goreng dimasak dengan bumbu taoco harum.', 29000, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 36),
-        (b_makdjan, cat_udang, 'Udang Ca Sayur',          'Tumisan udang segar dengan aneka sayuran hijau.', 29000, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 37),
-        (b_makdjan, cat_udang, 'Udang Ca Jamur',          'Tumisan udang segar dengan jamur lembut bumbu tiram.', 29000, 'fa-shrimp', 'bg-amber-50',   NULL,      true, 38),
-        (b_makdjan, cat_udang, 'Udang Ca Kaylan',         'Tumisan udang segar dengan sayur kaylan renyah.', 29000, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 39),
-        (b_makdjan, cat_udang, 'Udang Ca Kangkung',       'Tumisan udang segar dengan kangkung bawang putih.', 29000, 'fa-shrimp', 'bg-emerald-50', NULL,      true, 40);
+        (b_makdjan, cat_udang, 'Udang Bago Spesial',       '', 32000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 30),
+        (b_makdjan, cat_udang, 'Udang Bago Grng Mentega',  '', 30000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 31),
+        (b_makdjan, cat_udang, 'Udang Goreng Mak Djan',    '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 32),
+        (b_makdjan, cat_udang, 'Udang Goreng Asam Manis',  '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 33),
+        (b_makdjan, cat_udang, 'Udang Goreng Mentega',     '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 34),
+        (b_makdjan, cat_udang, 'Udang Goreng Tepung',      '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 35),
+        (b_makdjan, cat_udang, 'Udang Goreng Masak Taoco', '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 36),
+        (b_makdjan, cat_udang, 'Udang Ca Sayur',           '', 29000, 'fa-shrimp', 'bg-emerald-50', NULL, true, 37),
+        (b_makdjan, cat_udang, 'Udang Ca Jamur',           '', 29000, 'fa-shrimp', 'bg-amber-50',   NULL, true, 38),
+        (b_makdjan, cat_udang, 'Udang Ca Kaylan',          '', 29000, 'fa-shrimp', 'bg-emerald-50', NULL, true, 39),
+        (b_makdjan, cat_udang, 'Udang Ca Kangkung',        '', 29000, 'fa-shrimp', 'bg-emerald-50', NULL, true, 40);
 
     -- 6. ANEKA SOUP (6 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_soup, 'Soup Asparagus Kepiting',       'Sup kental hangat perpaduan asparagus lembut dan daging kepiting.', 42000, 'fa-bowl-food', 'bg-amber-50', 'Best',    true, 41),
-        (b_makdjan, cat_soup, 'Soup Asparagus Kepiting (1/2)', 'Sup asparagus kepiting hangat porsi setengah.', 25000, 'fa-bowl-food', 'bg-amber-50', 'Favorit', true, 42),
-        (b_makdjan, cat_soup, 'Soup Shanghay',                 'Sup hangat ala Shanghai dengan isian lengkap dan kuah gurih.', 33000, 'fa-bowl-food', 'bg-amber-50', NULL,      true, 43),
-        (b_makdjan, cat_soup, 'Soup Ayam',                     'Sup kaldu ayam bening hangat yang gurih dan menyegarkan.', 29000, 'fa-bowl-food', 'bg-amber-50', NULL,      true, 44),
-        (b_makdjan, cat_soup, 'Soup Tahu Sayur Asin',          'Sup segar berisi tahu lembut dan sawi asin pilihan.', 29000, 'fa-bowl-food', 'bg-amber-50', NULL,      true, 45),
-        (b_makdjan, cat_soup, 'Soup Sapi',                     'Sup irisan daging sapi empuk dalam kuah kaldu hangat.', 30000, 'fa-bowl-food', 'bg-amber-50', NULL,      true, 46);
+        (b_makdjan, cat_soup, 'Soup Asparagus Kepiting',       '', 42000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 41),
+        (b_makdjan, cat_soup, 'Soup Asparagus Kepiting (1/2)', '', 25000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 42),
+        (b_makdjan, cat_soup, 'Soup Shanghay',                 '', 33000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 43),
+        (b_makdjan, cat_soup, 'Soup Ayam',                     '', 29000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 44),
+        (b_makdjan, cat_soup, 'Soup Tahu Sayur Asin',          '', 29000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 45),
+        (b_makdjan, cat_soup, 'Soup Sapi',                     '', 30000, 'fa-bowl-food', 'bg-amber-50', NULL, true, 46);
 
     -- 7. ANEKA MINUMAN (18 items)
     INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, tag, is_available, sort_order)
     VALUES
-        (b_makdjan, cat_minuman, 'Es Pelangi',             'Minuman es segar warna-warni manis menyegarkan.', 8000,  'fa-glass-water', 'bg-pink-50',    'Favorit', true, 47),
-        (b_makdjan, cat_minuman, 'Lemon Tea',              'Teh hangat dengan perasan jeruk lemon segar.', 6000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 48),
-        (b_makdjan, cat_minuman, 'Wedang Teh Tawar',       'Teh seduh hangat melati khas Solo tanpa gula.', 3000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 49),
-        (b_makdjan, cat_minuman, 'Wedang Teh Manis',       'Teh seduh hangat manis khas Solo.', 5000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 50),
-        (b_makdjan, cat_minuman, 'Wedang Jeruk',           'Minuman jeruk peras hangat manis segar.', 7000,  'fa-mug-hot',     'bg-amber-50',   NULL,      true, 51),
-        (b_makdjan, cat_minuman, 'Wedang Kopi',            'Kopi hitam seduh hangat harum.', 6000,  'fa-mug-hot',     'bg-stone-100',  NULL,      true, 52),
-        (b_makdjan, cat_minuman, 'Wedang Kopi Susu',       'Kopi seduh hangat berpadu susu manis legit.', 8000,  'fa-mug-saucer',  'bg-amber-50',   NULL,      true, 53),
-        (b_makdjan, cat_minuman, 'Es Teh Tawar',           'Es teh melati segar tanpa gula.', 4000,  'fa-glass-water', 'bg-amber-50',   NULL,      true, 54),
-        (b_makdjan, cat_minuman, 'Es Teh Manis',           'Es teh manis segar khas Solo.', 5000,  'fa-glass-water', 'bg-amber-50',   'Best',    true, 55),
-        (b_makdjan, cat_minuman, 'Es Hijau',               'Minuman es sirup hijau manis dan segar.', 8000,  'fa-glass-water', 'bg-emerald-50', NULL,      true, 56),
-        (b_makdjan, cat_minuman, 'Es Kopi',                'Es kopi hitam dingin menyegarkan.', 7000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 57),
-        (b_makdjan, cat_minuman, 'Es Jeruk',               'Es jeruk peras segar manis alami.', 8000,  'fa-glass-water', 'bg-amber-50',   'Best',    true, 58),
-        (b_makdjan, cat_minuman, 'Es Sirup',               'Minuman es sirup manis segar.', 6000,  'fa-glass-water', 'bg-pink-50',    NULL,      true, 59),
-        (b_makdjan, cat_minuman, 'Es Lemon Tea',           'Es teh segar dengan perasan jeruk lemon.', 7000,  'fa-glass-water', 'bg-amber-50',   'Favorit', true, 60),
-        (b_makdjan, cat_minuman, 'Es Soda Gembira',        'Perpaduan soda dingin, susu kental manis, dan sirup segar.', 12000, 'fa-glass-water', 'bg-pink-50',    'Favorit', true, 61),
-        (b_makdjan, cat_minuman, 'Es Batu',                'Tambahan es batu kristal bersih.', 1000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 62),
-        (b_makdjan, cat_minuman, 'Coca Cola/Fanta/Sprite', 'Minuman ringan berkarbonasi dingin (pilih di catatan).', 8000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 63),
-        (b_makdjan, cat_minuman, 'Aqua',                   'Air mineral kemasan botol Aqua.', 5000,  'fa-glass-water', 'bg-stone-100',  NULL,      true, 64);
+        (b_makdjan, cat_minuman, 'Es Pelangi',             '', 8000,  'fa-glass-water', 'bg-pink-50',    NULL, true, 47),
+        (b_makdjan, cat_minuman, 'Lemon Tea',              '', 6000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 48),
+        (b_makdjan, cat_minuman, 'Wedang Teh Tawar',       '', 3000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 49),
+        (b_makdjan, cat_minuman, 'Wedang Teh Manis',       '', 5000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 50),
+        (b_makdjan, cat_minuman, 'Wedang Jeruk',           '', 7000,  'fa-mug-hot',     'bg-amber-50',   NULL, true, 51),
+        (b_makdjan, cat_minuman, 'Wedang Kopi',            '', 6000,  'fa-mug-hot',     'bg-stone-100',  NULL, true, 52),
+        (b_makdjan, cat_minuman, 'Wedang Kopi Susu',       '', 8000,  'fa-mug-saucer',  'bg-amber-50',   NULL, true, 53),
+        (b_makdjan, cat_minuman, 'Es Teh Tawar',           '', 4000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 54),
+        (b_makdjan, cat_minuman, 'Es Teh Manis',           '', 5000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 55),
+        (b_makdjan, cat_minuman, 'Es Hijau',               '', 8000,  'fa-glass-water', 'bg-emerald-50', NULL, true, 56),
+        (b_makdjan, cat_minuman, 'Es Kopi',                '', 7000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 57),
+        (b_makdjan, cat_minuman, 'Es Jeruk',               '', 8000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 58),
+        (b_makdjan, cat_minuman, 'Es Sirup',               '', 6000,  'fa-glass-water', 'bg-pink-50',    NULL, true, 59),
+        (b_makdjan, cat_minuman, 'Es Lemon Tea',           '', 7000,  'fa-glass-water', 'bg-amber-50',   NULL, true, 60),
+        (b_makdjan, cat_minuman, 'Es Soda Gembira',        '', 12000, 'fa-glass-water', 'bg-pink-50',    NULL, true, 61),
+        (b_makdjan, cat_minuman, 'Es Batu',                '', 1000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 62),
+        (b_makdjan, cat_minuman, 'Coca Cola/Fanta/Sprite', '', 8000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 63),
+        (b_makdjan, cat_minuman, 'Aqua',                   '', 5000,  'fa-glass-water', 'bg-stone-100',  NULL, true, 64);
 END $$;
