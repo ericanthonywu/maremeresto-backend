@@ -241,13 +241,19 @@ func (c *Client) readPump() {
 
 		var req struct {
 			Action string `json:"action"`
+			Event  string `json:"event"`
 			Room   string `json:"room"`
 		}
 		if err := json.Unmarshal(message, &req); err != nil {
 			continue
 		}
 
-		switch req.Action {
+		action := req.Action
+		if action == "" {
+			action = req.Event
+		}
+
+		switch action {
 		case "join":
 			if c.hub.JoinRoom(c, req.Room) {
 				c.writeJSON(Message{Room: req.Room, Event: "joined"})

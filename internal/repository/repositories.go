@@ -975,21 +975,38 @@ func (r *Repository) ListOrdersForCustomer(ctx context.Context, userID uuid.UUID
 	return r.listOrders(ctx, orderFilter{UserID: &userID}, limit, offset)
 }
 
-func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status string, search string, limit, offset int) ([]model.Order, int, error) {
-	return r.listOrders(ctx, orderFilter{BranchID: branchID, Status: status, Search: search}, limit, offset)
+func (r *Repository) ListOrders(ctx context.Context, branchID *uuid.UUID, status string, search string, dateFrom, dateTo *time.Time, includeActive bool, limit, offset int) ([]model.Order, int, error) {
+	return r.listOrders(ctx, orderFilter{
+		BranchID:      branchID,
+		Status:        status,
+		Search:        search,
+		DateFrom:      dateFrom,
+		DateTo:        dateTo,
+		IncludeActive: includeActive,
+	}, limit, offset)
 }
 
 // CountOrdersByStatus supplies the badges on the admin status filters. It is
-// deliberately independent of the currently selected filter/search term so
-// staff can see where work is waiting before switching tabs.
-func (r *Repository) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID) (map[string]int, error) {
-	query := `SELECT status, COUNT(*) FROM orders`
+// deliberately independent of the currently selected status/search term so
+// staff can see where work is waiting before switching tabs, while respecting
+// the active date filter.
+func (r *Repository) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID, dateFrom, dateTo *time.Time, includeActive bool) (map[string]int, error) {
+	query := `SELECT o.status, COUNT(*) FROM orders o WHERE 1=1`
 	args := []any{}
+	idx := 1
+
 	if branchID != nil {
-		query += ` WHERE branch_id = $1`
+		query += fmt.Sprintf(` AND o.branch_id = $%d`, idx)
 		args = append(args, *branchID)
+		idx++
 	}
-	query += ` GROUP BY status`
+	dateClause, dateArgs, nextIdx := buildOrderDateClause(dateFrom, dateTo, includeActive, idx)
+	if dateClause != "" {
+		query += " AND " + dateClause
+		args = append(args, dateArgs...)
+		idx = nextIdx
+	}
+	query += ` GROUP BY o.status`
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -1010,10 +1027,54 @@ func (r *Repository) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUI
 }
 
 type orderFilter struct {
-	BranchID *uuid.UUID
-	UserID   *uuid.UUID
-	Status   string
-	Search   string
+	BranchID      *uuid.UUID
+	UserID        *uuid.UUID
+	Status        string
+	Search        string
+	DateFrom      *time.Time
+	DateTo        *time.Time
+	IncludeActive bool
+}
+
+func buildOrderDateClause(dateFrom, dateTo *time.Time, includeActive bool, startIdx int) (string, []any, int) {
+	if dateFrom == nil && dateTo == nil {
+		return "", nil, startIdx
+	}
+	args := []any{}
+	idx := startIdx
+
+	if dateFrom != nil && dateTo != nil {
+		fromIdx := idx
+		toIdx := idx + 1
+		args = append(args, *dateFrom, *dateTo)
+		idx += 2
+
+		clause := fmt.Sprintf(
+			"((o.created_at >= $%d AND o.created_at < $%d) OR (o.scheduled_at IS NOT NULL AND o.scheduled_at >= $%d AND o.scheduled_at < $%d)",
+			fromIdx, toIdx, fromIdx, toIdx,
+		)
+		if includeActive {
+			activeCutoff := dateFrom.Add(-24 * time.Hour)
+			activeIdx := idx
+			args = append(args, activeCutoff)
+			idx++
+			clause += fmt.Sprintf(" OR (o.status = 'accepted' AND o.created_at >= $%d)", activeIdx)
+		}
+		clause += ")"
+		return clause, args, idx
+	}
+
+	if dateFrom != nil {
+		fromIdx := idx
+		args = append(args, *dateFrom)
+		idx++
+		return fmt.Sprintf("(o.created_at >= $%d OR (o.scheduled_at IS NOT NULL AND o.scheduled_at >= $%d))", fromIdx, fromIdx), args, idx
+	}
+
+	toIdx := idx
+	args = append(args, *dateTo)
+	idx++
+	return fmt.Sprintf("(o.created_at < $%d OR (o.scheduled_at IS NOT NULL AND o.scheduled_at < $%d))", toIdx, toIdx), args, idx
 }
 
 func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offset int) ([]model.Order, int, error) {
@@ -1040,6 +1101,11 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		// Admin orders list: do not include unpaid pending orders unless explicitly asked
 		baseQuery += " AND o.status != 'pending'"
 	}
+	if dateClause, dateArgs, nextIdx := buildOrderDateClause(f.DateFrom, f.DateTo, f.IncludeActive, idx); dateClause != "" {
+		baseQuery += " AND " + dateClause
+		args = append(args, dateArgs...)
+		idx = nextIdx
+	}
 	if search != "" {
 		baseQuery += fmt.Sprintf(" AND (o.order_number ILIKE $%d OR o.customer_name ILIKE $%d OR o.customer_phone ILIKE $%d)", idx, idx, idx)
 		args = append(args, "%"+search+"%")
@@ -1060,7 +1126,10 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		       o.promo_code, o.scheduled_at, o.acknowledged_at,
 		       o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug
-		` + baseQuery + fmt.Sprintf(" ORDER BY o.created_at DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+		` + baseQuery + fmt.Sprintf(
+		" ORDER BY COALESCE(CASE WHEN o.order_type = 'scheduled' THEN o.scheduled_at END, o.created_at) DESC, o.created_at DESC LIMIT $%d OFFSET $%d",
+		idx, idx+1,
+	)
 
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, selectQuery, args...)

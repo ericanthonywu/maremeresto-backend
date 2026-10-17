@@ -884,12 +884,12 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*model.Order, err
 	return order, nil
 }
 
-func (s *Service) ListOrders(ctx context.Context, branchID *uuid.UUID, status, search string, limit, offset int) ([]model.Order, int, error) {
-	return s.repo.ListOrders(ctx, branchID, status, search, limit, offset)
+func (s *Service) ListOrders(ctx context.Context, branchID *uuid.UUID, status, search string, dateFrom, dateTo *time.Time, includeActive bool, limit, offset int) ([]model.Order, int, error) {
+	return s.repo.ListOrders(ctx, branchID, status, search, dateFrom, dateTo, includeActive, limit, offset)
 }
 
-func (s *Service) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID) (map[string]int, error) {
-	return s.repo.CountOrdersByStatus(ctx, branchID)
+func (s *Service) CountOrdersByStatus(ctx context.Context, branchID *uuid.UUID, dateFrom, dateTo *time.Time, includeActive bool) (map[string]int, error) {
+	return s.repo.CountOrdersByStatus(ctx, branchID, dateFrom, dateTo, includeActive)
 }
 
 // ListOrdersForCustomer returns the signed-in customer's own order history.
@@ -1392,9 +1392,6 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	statusCode, _ := payload["status_code"].(string)
 	grossAmount, _ := payload["gross_amount"].(string)
 	signatureKey, _ := payload["signature_key"].(string)
-	txStatus, _ := payload["transaction_status"].(string)
-	fraudStatus, _ := payload["fraud_status"].(string)
-	txID, _ := payload["transaction_id"].(string)
 
 	if orderID == "" {
 		return apperror.Invalid("order_id kosong pada notifikasi")
@@ -1403,6 +1400,20 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	if !verifyMidtransSignature(orderID, statusCode, grossAmount, signatureKey, s.cfg.MidtransServerKey) {
 		slog.Warn("rejected midtrans notification with bad signature", "order_id", orderID)
 		return apperror.ErrUnauthorized
+	}
+
+	return s.reconcileMidtransPayload(ctx, payload)
+}
+
+func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[string]any) error {
+	orderID, _ := payload["order_id"].(string)
+	grossAmount, _ := payload["gross_amount"].(string)
+	txStatus, _ := payload["transaction_status"].(string)
+	fraudStatus, _ := payload["fraud_status"].(string)
+	txID, _ := payload["transaction_id"].(string)
+
+	if orderID == "" {
+		return apperror.Invalid("order_id kosong pada notifikasi")
 	}
 
 	order, err := s.repo.FindOrderByOrderNumber(ctx, orderID)
@@ -1484,12 +1495,17 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	}
 
 	if advanced {
-		order.Status = "accepted"
-		s.broadcastStatus(order, "Pembayaran lunas, pesanan Anda mulai diproses.")
-		s.hub.Broadcast(ws.BranchRoom(order.BranchID), "new_order", order)
-		s.hub.Broadcast(ws.BranchRoom(order.BranchID), "order_paid", order)
-		s.hub.Broadcast(ws.RoomOwner, "new_order", order)
-		s.hub.Broadcast(ws.RoomOwner, "order_paid", order)
+		freshOrder, fErr := s.repo.FindOrderByID(ctx, order.ID)
+		if fErr != nil || freshOrder == nil {
+			order.Status = "accepted"
+			order.Version++
+			freshOrder = order
+		}
+		s.broadcastStatus(freshOrder, "Pembayaran lunas, pesanan Anda mulai diproses.")
+		s.hub.Broadcast(ws.BranchRoom(freshOrder.BranchID), "new_order", freshOrder)
+		s.hub.Broadcast(ws.BranchRoom(freshOrder.BranchID), "order_paid", freshOrder)
+		s.hub.Broadcast(ws.RoomOwner, "new_order", freshOrder)
+		s.hub.Broadcast(ws.RoomOwner, "order_paid", freshOrder)
 	}
 
 	return nil
@@ -1527,8 +1543,8 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 	}
 
 	if txStatus, _ := payload["transaction_status"].(string); txStatus == "settlement" || txStatus == "capture" {
-		if err := s.HandleMidtransWebhook(ctx, payload); err != nil {
-			slog.Warn("sync midtrans webhook handler returned error", "err", err)
+		if err := s.reconcileMidtransPayload(ctx, payload); err != nil {
+			slog.Warn("sync midtrans payload reconciliation returned error", "err", err)
 		}
 	}
 

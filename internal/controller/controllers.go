@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
@@ -515,6 +516,16 @@ func (c *Controller) GetOrder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apperror.ErrNotFound)
 		return
 	}
+
+	// Reconcile pending payments if the customer opens tracking/success before the Midtrans webhook arrives.
+	if order.Status == "pending" && order.Payment != nil && order.Payment.Status == "pending" {
+		if synced, syncErr := c.svc.SyncPaymentWithMidtrans(r.Context(), order.OrderNumber); syncErr == nil && synced != nil && synced.Status == "settlement" {
+			if refreshed, rErr := c.svc.GetOrder(r.Context(), id); rErr == nil && refreshed != nil {
+				order = refreshed
+			}
+		}
+	}
+
 	ok(w, order)
 }
 
@@ -534,6 +545,24 @@ func (c *Controller) ListMyOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "data": orders, "total": total})
 }
 
+func parseDateParam(raw string, endOfDay bool) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02", raw, service.OutletLocation); err == nil {
+		if endOfDay {
+			nextDay := t.AddDate(0, 0, 1)
+			return &nextDay, nil
+		}
+		return &t, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t, nil
+	}
+	return nil, apperror.Invalid("format tanggal tidak valid (gunakan YYYY-MM-DD)")
+}
+
 func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
 	requested, err := queryUUID(r, "branch_id")
 	if err != nil {
@@ -546,11 +575,24 @@ func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	dateFrom, err := parseDateParam(r.URL.Query().Get("date_from"), false)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	dateTo, err := parseDateParam(r.URL.Query().Get("date_to"), true)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	includeActive := r.URL.Query().Get("include_active") == "1" || r.URL.Query().Get("include_active") == "true"
+
 	limit, offset := paging(r)
 	orders, total, err := c.svc.ListOrders(
 		r.Context(), branchID,
 		r.URL.Query().Get("status"),
 		r.URL.Query().Get("search"),
+		dateFrom, dateTo, includeActive,
 		limit, offset,
 	)
 	if err != nil {
@@ -563,7 +605,7 @@ func (c *Controller) ListOrders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	statusCounts, err := c.svc.CountOrdersByStatus(r.Context(), branchID)
+	statusCounts, err := c.svc.CountOrdersByStatus(r.Context(), branchID, dateFrom, dateTo, includeActive)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1086,7 +1128,16 @@ func (c *Controller) OwnerDashboard(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	var identity *ws.Identity
 
-	if token := r.URL.Query().Get("token"); token != "" {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		} else if cookie, err := r.Cookie("token"); err == nil {
+			token = cookie.Value
+		}
+	}
+
+	if token != "" {
 		claims, err := middleware.ParseToken(c.cfg, token)
 		if err != nil {
 			writeError(w, apperror.ErrUnauthorized)
@@ -1095,7 +1146,14 @@ func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		identity = &ws.Identity{UserID: claims.UserID, Role: claims.Role, BranchID: claims.BranchID}
 	}
 
-	ws.ServeWs(c.hub, w, r, identity, []string{c.cfg.CustomerURL, c.cfg.AdminURL})
+	origins := []string{c.cfg.CustomerURL, c.cfg.AdminURL}
+	if !c.cfg.IsProduction() {
+		origins = append(origins,
+			"http://localhost:5173", "http://localhost:5174",
+			"http://127.0.0.1:5173", "http://127.0.0.1:5174",
+		)
+	}
+	ws.ServeWs(c.hub, w, r, identity, origins)
 }
 
 // Health is the liveness probe for nginx and the process manager.
