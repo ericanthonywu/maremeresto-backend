@@ -448,7 +448,8 @@ func (c *Controller) QuoteDelivery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Controller) SearchAddress(w http.ResponseWriter, r *http.Request) {
-	results, err := c.svc.SearchAddress(r.Context(), r.URL.Query().Get("q"))
+	scope := r.URL.Query().Get("scope")
+	results, err := c.svc.SearchAddress(r.Context(), r.URL.Query().Get("q"), scope)
 	if err != nil {
 		writeError(w, err)
 		return

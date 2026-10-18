@@ -25,10 +25,18 @@ const (
 	geocodeMaxResults = 6
 )
 
-// Viewport biasing the search towards Surakarta and the surrounding
-// Soloraya area, where every outlet trades.
+// Surakarta (Solo) city bounding box based on official administrative boundaries (relation 9687063).
+// Coordinates: min_lon: 110.7690, max_lat: -7.5232, max_lon: 110.8690, min_lat: -7.5953.
+// Viewbox format for Nominatim is <left>,<top>,<right>,<bottom> (<min_lon>,<max_lat>,<max_lon>,<min_lat>).
 const (
-	soloViewbox = "110.6500,-7.7200,110.9500,-7.4200"
+	surakartaViewbox = "110.7680,-7.5220,110.8700,-7.5960"
+	surakartaMinLon  = 110.7680
+	surakartaMaxLon  = 110.8700
+	surakartaMinLat  = -7.5960
+	surakartaMaxLat  = -7.5220
+
+	// Greater Surakarta (Solo Raya) viewport.
+	soloViewbox = "110.6500,-7.4200,110.9500,-7.7200"
 )
 
 type geocodeCacheEntry struct {
@@ -186,10 +194,40 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// SearchAddress resolves free-text typed by the customer into real
-// coordinates. Previously the app pinned every typed address to one fixed
-// coordinate, which silently mispriced delivery.
-func (s *Service) SearchAddress(ctx context.Context, query string) ([]dto.GeocodeResult, error) {
+func isWithinSurakarta(lat, lon float64) bool {
+	return lat >= surakartaMinLat && lat <= surakartaMaxLat && lon >= surakartaMinLon && lon <= surakartaMaxLon
+}
+
+func isSurakartaPlace(p nominatimPlace) bool {
+	lat, err1 := strconv.ParseFloat(p.Lat, 64)
+	lon, err2 := strconv.ParseFloat(p.Lon, 64)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if !isWithinSurakarta(lat, lon) {
+		return false
+	}
+
+	// Exclude neighboring regencies if Nominatim explicitly labeled the place as belonging to them.
+	lowerCounty := strings.ToLower(p.Address.County)
+	if lowerCounty == "sukoharjo" || lowerCounty == "karanganyar" || lowerCounty == "boyolali" || lowerCounty == "klaten" {
+		return false
+	}
+	lowerDisplay := strings.ToLower(p.DisplayName)
+	if strings.Contains(lowerDisplay, "kabupaten sukoharjo") ||
+		strings.Contains(lowerDisplay, "kabupaten karanganyar") ||
+		strings.Contains(lowerDisplay, "kabupaten boyolali") ||
+		strings.Contains(lowerDisplay, "kabupaten klaten") {
+		return false
+	}
+	return true
+}
+
+// SearchAddress resolves free-text typed by the customer into real coordinates.
+// By default or when scope is "surakarta", results are strictly restricted to
+// Kota Surakarta (Surakarta City) to ensure all customer address lookups remain
+// within the serviceable city area.
+func (s *Service) SearchAddress(ctx context.Context, query string, scope ...string) ([]dto.GeocodeResult, error) {
 	query = strings.TrimSpace(query)
 	if len(query) < 3 {
 		return nil, apperror.Invalid("masukkan minimal 3 karakter untuk mencari alamat")
@@ -198,30 +236,67 @@ func (s *Service) SearchAddress(ctx context.Context, query string) ([]dto.Geocod
 		return nil, apperror.Invalid("kata kunci alamat terlalu panjang")
 	}
 
-	params := url.Values{}
-	params.Set("q", query)
-	params.Set("limit", strconv.Itoa(geocodeMaxResults))
-	params.Set("addressdetails", "1")
-	params.Set("countrycodes", "id")
-	params.Set("viewbox", soloViewbox)
-	params.Set("bounded", "0")
+	targetScope := "surakarta"
+	if len(scope) > 0 && scope[0] != "" {
+		targetScope = strings.ToLower(scope[0])
+	}
+	isSurakartaScope := targetScope == "surakarta" || targetScope == "solo" || targetScope == "kota_surakarta"
 
-	body, err := s.geocoder.fetch(ctx, "/search", params)
+	searchOnce := func(q string) ([]dto.GeocodeResult, error) {
+		params := url.Values{}
+		params.Set("q", q)
+		params.Set("limit", strconv.Itoa(geocodeMaxResults))
+		params.Set("addressdetails", "1")
+		params.Set("countrycodes", "id")
+
+		if isSurakartaScope {
+			params.Set("viewbox", surakartaViewbox)
+			params.Set("bounded", "1")
+		} else {
+			params.Set("viewbox", soloViewbox)
+			params.Set("bounded", "0")
+		}
+
+		body, err := s.geocoder.fetch(ctx, "/search", params)
+		if err != nil {
+			return nil, err
+		}
+
+		var places []nominatimPlace
+		if err := json.Unmarshal(body, &places); err != nil {
+			return nil, apperror.ErrGeocoderUnavailable
+		}
+
+		results := make([]dto.GeocodeResult, 0, len(places))
+		for _, p := range places {
+			if isSurakartaScope && !isSurakartaPlace(p) {
+				continue
+			}
+			if r, ok := p.toResult(); ok {
+				results = append(results, r)
+			}
+		}
+		return results, nil
+	}
+
+	results, err := searchOnce(query)
 	if err != nil {
 		return nil, err
 	}
 
-	var places []nominatimPlace
-	if err := json.Unmarshal(body, &places); err != nil {
-		return nil, apperror.ErrGeocoderUnavailable
-	}
-
-	results := make([]dto.GeocodeResult, 0, len(places))
-	for _, p := range places {
-		if r, ok := p.toResult(); ok {
-			results = append(results, r)
+	// If no results were found within Surakarta, and the query does not already
+	// specify Surakarta/Solo, retry once with "Surakarta" appended. This helps
+	// find landmarks (e.g. "Pasar Gede", "Stadion Manahan") where Nominatim indexes
+	// the feature with city context.
+	if len(results) == 0 && isSurakartaScope {
+		lowerQ := strings.ToLower(query)
+		if !strings.Contains(lowerQ, "surakarta") && !strings.Contains(lowerQ, "solo") {
+			if fallbackResults, fallbackErr := searchOnce(query + ", Surakarta"); fallbackErr == nil && len(fallbackResults) > 0 {
+				results = fallbackResults
+			}
 		}
 	}
+
 	return results, nil
 }
 
