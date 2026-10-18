@@ -67,6 +67,52 @@ func TestIsSurakartaPlace(t *testing.T) {
 	}
 }
 
+func TestNormalizeIndonesianSpelling(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"Dr radjiman 415", "Dr rajiman 415"},
+		{"Jl Dr Radjiman 415", "Jl Dr Rajiman 415"},
+		{"Soedirman", "Sudirman"},
+		{"Tjokroaminoto", "Cokroaminoto"},
+		{"Moewardi", "Muwardi"},
+	}
+
+	for _, tc := range cases {
+		got := normalizeIndonesianSpelling(tc.in)
+		if got != tc.want {
+			t.Errorf("normalizeIndonesianSpelling(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestGenerateQueryCandidates(t *testing.T) {
+	candidates := generateQueryCandidates("Dr radjiman 415")
+	foundRajiman := false
+	for _, c := range candidates {
+		if c == "Dr rajiman 415" {
+			foundRajiman = true
+			break
+		}
+	}
+	if !foundRajiman {
+		t.Errorf("expected generateQueryCandidates to produce 'Dr rajiman 415', got %v", candidates)
+	}
+
+	candidatesJl := generateQueryCandidates("Jl. Dr. Radjiman No. 415")
+	foundDrRajiman := false
+	for _, c := range candidatesJl {
+		if strings.Contains(c, "Rajiman") {
+			foundDrRajiman = true
+			break
+		}
+	}
+	if !foundDrRajiman {
+		t.Errorf("expected generateQueryCandidates to produce Rajiman variation, got %v", candidatesJl)
+	}
+}
+
 func TestSearchAddressWithMockServer(t *testing.T) {
 	// Mock Nominatim server
 	nominatimHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +135,35 @@ func TestSearchAddressWithMockServer(t *testing.T) {
 			return
 		}
 
-		// Return a valid Surakarta place
+		// OSM doesn't have "radjiman" with dj, only "rajiman" with j
+		if strings.Contains(strings.ToLower(q), "radjiman") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[]`))
+			return
+		}
+
+		if strings.Contains(strings.ToLower(q), "rajiman") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{
+					"place_id": 99999,
+					"lat": "-7.5717985",
+					"lon": "110.8125492",
+					"display_name": "Jalan Dokter Rajiman Widiodiningrat, Sriwedari, Surakarta, Jawa Tengah, 57149, Indonesia",
+					"address": {
+						"road": "Jalan Dokter Rajiman Widiodiningrat",
+						"village": "Sriwedari",
+						"city": "Surakarta",
+						"state": "Jawa Tengah",
+						"postcode": "57149",
+						"country": "Indonesia"
+					}
+				}
+			]`))
+			return
+		}
+
+		// Return a valid Surakarta place for Slamet Riyadi
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`[
 			{
@@ -126,6 +200,18 @@ func TestSearchAddressWithMockServer(t *testing.T) {
 	}
 	if results[0].Label == "" || results[0].Latitude == 0 {
 		t.Errorf("invalid result content: %+v", results[0])
+	}
+
+	// Test Dr radjiman 415 query (should fall back to Dr rajiman 415 and succeed)
+	radjimanResults, err := svc.SearchAddress(context.Background(), "Dr radjiman 415")
+	if err != nil {
+		t.Fatalf("unexpected error on Dr radjiman 415: %v", err)
+	}
+	if len(radjimanResults) != 1 {
+		t.Fatalf("expected 1 result for 'Dr radjiman 415', got %d", len(radjimanResults))
+	}
+	if !strings.Contains(radjimanResults[0].FullAddress, "Rajiman") {
+		t.Errorf("expected address to contain Rajiman, got %s", radjimanResults[0].FullAddress)
 	}
 
 	// Test outside query

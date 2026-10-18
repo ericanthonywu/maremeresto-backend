@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,6 +224,97 @@ func isSurakartaPlace(p nominatimPlace) bool {
 	return true
 }
 
+var (
+	reDj      = regexp.MustCompile(`(?i)dj`)
+	reOe      = regexp.MustCompile(`(?i)oe`)
+	reTj      = regexp.MustCompile(`(?i)tj`)
+	reJlDr    = regexp.MustCompile(`(?i)\b(jalan|jln|jl)\.?\s+(dr|dokter)\.?\s+`)
+	reLeadJl  = regexp.MustCompile(`(?i)^(jalan|jln|jl)\.?\s+`)
+	reNoNum   = regexp.MustCompile(`(?i)\b(no|nomor)\.?\s*`)
+	reHouseNo = regexp.MustCompile(`(?i)\s+(no\.?\s*)?\d+[a-z]?\b`)
+)
+
+func normalizeIndonesianSpelling(s string) string {
+	res := reDj.ReplaceAllStringFunc(s, func(m string) string {
+		if m[0] == 'D' {
+			return "J"
+		}
+		return "j"
+	})
+	res = reOe.ReplaceAllStringFunc(res, func(m string) string {
+		if m[0] == 'O' {
+			return "U"
+		}
+		return "u"
+	})
+	res = reTj.ReplaceAllStringFunc(res, func(m string) string {
+		if m[0] == 'T' {
+			return "C"
+		}
+		return "c"
+	})
+	return res
+}
+
+func generateQueryCandidates(query string) []string {
+	q := strings.Join(strings.Fields(query), " ")
+	seen := make(map[string]struct{})
+	var candidates []string
+
+	addCandidate := func(s string) {
+		s = strings.TrimSpace(s)
+		sLower := strings.ToLower(s)
+		if len(sLower) < 3 {
+			return
+		}
+		if _, exists := seen[sLower]; !exists {
+			seen[sLower] = struct{}{}
+			candidates = append(candidates, s)
+		}
+	}
+
+	// 1. Original query
+	addCandidate(q)
+
+	// 2. Spelling normalized (e.g. Radjiman -> Rajiman, Soedirman -> Sudirman)
+	spellingNorm := normalizeIndonesianSpelling(q)
+	addCandidate(spellingNorm)
+
+	// For both original and spelling-normalized forms, generate structural variations
+	for _, base := range []string{q, spellingNorm} {
+		// Clean chained "Jl. Dr." -> "Dr."
+		if reJlDr.MatchString(base) {
+			addCandidate(reJlDr.ReplaceAllString(base, "Dr. "))
+			addCandidate(reJlDr.ReplaceAllString(base, "Dokter "))
+		}
+
+		// Remove leading "Jl." / "Jalan"
+		if reLeadJl.MatchString(base) {
+			cleaned := strings.TrimSpace(reLeadJl.ReplaceAllString(base, ""))
+			addCandidate(cleaned)
+		}
+
+		// Remove "No." / "Nomor"
+		if reNoNum.MatchString(base) {
+			cleaned := strings.TrimSpace(reNoNum.ReplaceAllString(base, ""))
+			addCandidate(cleaned)
+		}
+
+		// If a house number is present, also add the street name without house number
+		// as a fallback (so an unmapped house number still resolves to the street).
+		if reHouseNo.MatchString(base) {
+			withoutNum := strings.TrimSpace(reHouseNo.ReplaceAllString(base, ""))
+			addCandidate(withoutNum)
+
+			if reLeadJl.MatchString(withoutNum) {
+				addCandidate(strings.TrimSpace(reLeadJl.ReplaceAllString(withoutNum, "")))
+			}
+		}
+	}
+
+	return candidates
+}
+
 // SearchAddress resolves free-text typed by the customer into real coordinates.
 // By default or when scope is "surakarta", results are strictly restricted to
 // Kota Surakarta (Surakarta City) to ensure all customer address lookups remain
@@ -279,20 +371,30 @@ func (s *Service) SearchAddress(ctx context.Context, query string, scope ...stri
 		return results, nil
 	}
 
-	results, err := searchOnce(query)
-	if err != nil {
-		return nil, err
+	candidates := generateQueryCandidates(query)
+
+	var results []dto.GeocodeResult
+	for _, cand := range candidates {
+		res, err := searchOnce(cand)
+		if err == nil && len(res) > 0 {
+			results = res
+			break
+		}
 	}
 
-	// If no results were found within Surakarta, and the query does not already
-	// specify Surakarta/Solo, retry once with "Surakarta" appended. This helps
+	// If no results were found within Surakarta, and the candidate does not already
+	// specify Surakarta/Solo, retry candidates with ", Surakarta" appended. This helps
 	// find landmarks (e.g. "Pasar Gede", "Stadion Manahan") where Nominatim indexes
 	// the feature with city context.
 	if len(results) == 0 && isSurakartaScope {
-		lowerQ := strings.ToLower(query)
-		if !strings.Contains(lowerQ, "surakarta") && !strings.Contains(lowerQ, "solo") {
-			if fallbackResults, fallbackErr := searchOnce(query + ", Surakarta"); fallbackErr == nil && len(fallbackResults) > 0 {
-				results = fallbackResults
+		for _, cand := range candidates {
+			lowerCand := strings.ToLower(cand)
+			if !strings.Contains(lowerCand, "surakarta") && !strings.Contains(lowerCand, "solo") {
+				res, err := searchOnce(cand + ", Surakarta")
+				if err == nil && len(res) > 0 {
+					results = res
+					break
+				}
 			}
 		}
 	}
