@@ -481,7 +481,7 @@ func (r *Repository) ListCategories(ctx context.Context) ([]model.Category, erro
 func (r *Repository) ListMenuItemsByBranch(ctx context.Context, branchID uuid.UUID) ([]model.MenuItem, error) {
 	query := `
 		SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
-		       m.image_url, m.tag, m.is_available, m.sort_order, m.created_at, m.updated_at,
+		       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
 		       c.name, c.slug, c.emoji
 		FROM menu_items m
 		JOIN categories c ON m.category_id = c.id
@@ -500,7 +500,7 @@ func (r *Repository) ListMenuItemsByBranch(ctx context.Context, branchID uuid.UU
 		var catName, catSlug, catEmoji string
 		if err := rows.Scan(
 			&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
-			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.CreatedAt, &m.UpdatedAt,
+			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.IsBestSeller, &m.CreatedAt, &m.UpdatedAt,
 			&catName, &catSlug, &catEmoji,
 		); err != nil {
 			return nil, err
@@ -519,7 +519,7 @@ func (r *Repository) ListMenuItemsByBranch(ctx context.Context, branchID uuid.UU
 func (r *Repository) FindMenuItemByID(ctx context.Context, id uuid.UUID) (*model.MenuItem, error) {
 	query := `
 		SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
-		       m.image_url, m.tag, m.is_available, m.sort_order, m.created_at, m.updated_at,
+		       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
 		       c.name, c.slug, c.emoji
 		FROM menu_items m
 		JOIN categories c ON m.category_id = c.id
@@ -529,7 +529,7 @@ func (r *Repository) FindMenuItemByID(ctx context.Context, id uuid.UUID) (*model
 	var catName, catSlug, catEmoji string
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
-		&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.CreatedAt, &m.UpdatedAt,
+		&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.IsBestSeller, &m.CreatedAt, &m.UpdatedAt,
 		&catName, &catSlug, &catEmoji,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -549,22 +549,22 @@ func (r *Repository) FindMenuItemByID(ctx context.Context, id uuid.UUID) (*model
 
 func (r *Repository) CreateMenuItem(ctx context.Context, m *model.MenuItem) error {
 	query := `
-		INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, image_url, tag, is_available, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, image_url, tag, is_available, sort_order, is_best_seller)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at
 	`
 	return r.db.QueryRow(ctx, query,
-		m.BranchID, m.CategoryID, m.Name, m.Description, m.Price, m.Icon, m.IconBgClass, m.ImageURL, m.Tag, m.IsAvailable, m.SortOrder,
+		m.BranchID, m.CategoryID, m.Name, m.Description, m.Price, m.Icon, m.IconBgClass, m.ImageURL, m.Tag, m.IsAvailable, m.SortOrder, m.IsBestSeller,
 	).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
 }
 
 func (r *Repository) UpdateMenuItem(ctx context.Context, m *model.MenuItem) error {
 	query := `
 		UPDATE menu_items
-		SET category_id = $1, name = $2, description = $3, price = $4, icon = $5, icon_bg_class = $6, image_url = $7, tag = $8, is_available = $9, updated_at = NOW()
-		WHERE id = $10
+		SET category_id = $1, name = $2, description = $3, price = $4, icon = $5, icon_bg_class = $6, image_url = $7, tag = $8, is_available = $9, is_best_seller = $10, updated_at = NOW()
+		WHERE id = $11
 	`
-	_, err := r.db.Exec(ctx, query, m.CategoryID, m.Name, m.Description, m.Price, m.Icon, m.IconBgClass, m.ImageURL, m.Tag, m.IsAvailable, m.ID)
+	_, err := r.db.Exec(ctx, query, m.CategoryID, m.Name, m.Description, m.Price, m.Icon, m.IconBgClass, m.ImageURL, m.Tag, m.IsAvailable, m.IsBestSeller, m.ID)
 	return err
 }
 
@@ -572,6 +572,135 @@ func (r *Repository) ToggleMenuItemAvailability(ctx context.Context, id uuid.UUI
 	query := `UPDATE menu_items SET is_available = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, isAvailable, id)
 	return err
+}
+
+func (r *Repository) ToggleMenuItemBestSeller(ctx context.Context, id uuid.UUID, isBestSeller bool) error {
+	query := `UPDATE menu_items SET is_best_seller = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, isBestSeller, id)
+	return err
+}
+
+func (r *Repository) ListBestSellerMenuItems(ctx context.Context, branchID *uuid.UUID) ([]model.MenuItem, error) {
+	var query string
+	var args []any
+
+	if branchID != nil {
+		query = `
+			SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
+			       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
+			       c.name, c.slug, c.emoji,
+			       b.name, b.slug
+			FROM menu_items m
+			JOIN categories c ON m.category_id = c.id
+			JOIN branches b ON m.branch_id = b.id
+			WHERE m.branch_id = $1 AND m.is_best_seller = true AND m.is_available = true
+			ORDER BY m.sort_order ASC, m.name ASC
+		`
+		args = append(args, *branchID)
+	} else {
+		query = `
+			SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
+			       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
+			       c.name, c.slug, c.emoji,
+			       b.name, b.slug
+			FROM menu_items m
+			JOIN categories c ON m.category_id = c.id
+			JOIN branches b ON m.branch_id = b.id
+			WHERE m.is_best_seller = true AND m.is_available = true
+			ORDER BY b.name ASC, m.sort_order ASC, m.name ASC
+		`
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]model.MenuItem, 0)
+	for rows.Next() {
+		var m model.MenuItem
+		var catName, catSlug, catEmoji string
+		var branchName, branchSlug string
+		if err := rows.Scan(
+			&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
+			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.IsBestSeller, &m.CreatedAt, &m.UpdatedAt,
+			&catName, &catSlug, &catEmoji,
+			&branchName, &branchSlug,
+		); err != nil {
+			return nil, err
+		}
+		m.Category = &model.Category{
+			ID:    m.CategoryID,
+			Name:  catName,
+			Slug:  catSlug,
+			Emoji: catEmoji,
+		}
+		m.BranchName = branchName
+		m.BranchSlug = branchSlug
+		items = append(items, m)
+	}
+
+	// Fallback to tagged items if no items have is_best_seller = true
+	if len(items) == 0 {
+		var fallbackQuery string
+		var fbArgs []any
+		if branchID != nil {
+			fallbackQuery = `
+				SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
+				       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
+				       c.name, c.slug, c.emoji,
+				       b.name, b.slug
+				FROM menu_items m
+				JOIN categories c ON m.category_id = c.id
+				JOIN branches b ON m.branch_id = b.id
+				WHERE m.branch_id = $1 AND m.is_available = true AND (m.tag ILIKE '%best%' OR m.tag ILIKE '%favorit%')
+				ORDER BY m.sort_order ASC, m.name ASC
+				LIMIT 12
+			`
+			fbArgs = append(fbArgs, *branchID)
+		} else {
+			fallbackQuery = `
+				SELECT m.id, m.branch_id, m.category_id, m.name, m.description, m.price, m.icon, m.icon_bg_class,
+				       m.image_url, m.tag, m.is_available, m.sort_order, m.is_best_seller, m.created_at, m.updated_at,
+				       c.name, c.slug, c.emoji,
+				       b.name, b.slug
+				FROM menu_items m
+				JOIN categories c ON m.category_id = c.id
+				JOIN branches b ON m.branch_id = b.id
+				WHERE m.is_available = true AND (m.tag ILIKE '%best%' OR m.tag ILIKE '%favorit%')
+				ORDER BY b.name ASC, m.sort_order ASC, m.name ASC
+				LIMIT 18
+			`
+		}
+		fbRows, fbErr := r.db.Query(ctx, fallbackQuery, fbArgs...)
+		if fbErr == nil {
+			defer fbRows.Close()
+			for fbRows.Next() {
+				var m model.MenuItem
+				var catName, catSlug, catEmoji string
+				var branchName, branchSlug string
+				if err := fbRows.Scan(
+					&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
+					&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.IsBestSeller, &m.CreatedAt, &m.UpdatedAt,
+					&catName, &catSlug, &catEmoji,
+					&branchName, &branchSlug,
+				); err == nil {
+					m.Category = &model.Category{
+						ID:    m.CategoryID,
+						Name:  catName,
+						Slug:  catSlug,
+						Emoji: catEmoji,
+					}
+					m.BranchName = branchName
+					m.BranchSlug = branchSlug
+					items = append(items, m)
+				}
+			}
+		}
+	}
+
+	return items, nil
 }
 
 func (r *Repository) DeleteMenuItem(ctx context.Context, id uuid.UUID) error {
@@ -1523,7 +1652,7 @@ func (r *Repository) FindMenuItemsByIDs(ctx context.Context, ids []uuid.UUID) (m
 
 	query := `
 		SELECT id, branch_id, category_id, name, description, price, icon, icon_bg_class,
-		       image_url, tag, is_available, sort_order
+		       image_url, tag, is_available, sort_order, is_best_seller
 		FROM menu_items
 		WHERE id = ANY($1)
 	`
@@ -1537,7 +1666,7 @@ func (r *Repository) FindMenuItemsByIDs(ctx context.Context, ids []uuid.UUID) (m
 		var m model.MenuItem
 		if err := rows.Scan(
 			&m.ID, &m.BranchID, &m.CategoryID, &m.Name, &m.Description, &m.Price, &m.Icon, &m.IconBgClass,
-			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder,
+			&m.ImageURL, &m.Tag, &m.IsAvailable, &m.SortOrder, &m.IsBestSeller,
 		); err != nil {
 			return nil, err
 		}

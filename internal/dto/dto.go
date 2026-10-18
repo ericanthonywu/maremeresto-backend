@@ -402,6 +402,7 @@ type CreateMenuItemRequest struct {
 	Tag         string    `json:"tag"`
 	IsAvailable bool      `json:"is_available"`
 	SortOrder   int       `json:"sort_order"`
+	IsBestSeller bool     `json:"is_best_seller"`
 }
 
 type CreateMenuItemsBulkRequest struct {
@@ -466,6 +467,7 @@ type UpdateMenuItemRequest struct {
 	Tag         *string    `json:"tag"`
 	IsAvailable *bool      `json:"is_available"`
 	SortOrder   *int       `json:"sort_order"`
+	IsBestSeller *bool     `json:"is_best_seller"`
 }
 
 // Validate checks only the fields actually supplied, so a partial update
@@ -503,6 +505,10 @@ func (r *UpdateMenuItemRequest) Validate() error {
 
 type ToggleAvailabilityRequest struct {
 	IsAvailable bool `json:"is_available"`
+}
+
+type ToggleBestSellerRequest struct {
+	IsBestSeller bool `json:"is_best_seller"`
 }
 
 type CreateCategoryRequest struct {

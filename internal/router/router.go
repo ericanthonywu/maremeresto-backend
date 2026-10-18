@@ -64,6 +64,7 @@ func registerRESTRoutes(
 		public.Get("/api/v1/branches/{slug}", ctrl.GetBranch)
 		public.Get("/api/v1/categories", ctrl.ListCategories)
 		public.Get("/api/v1/branches/{branch}/menu", ctrl.ListMenuByBranch)
+		public.Get("/api/v1/menu/best-sellers", ctrl.ListBestSellers)
 
 		// Midtrans posts here; the SHA-512 signature is the authentication.
 		public.Post("/api/v1/payments/notification", ctrl.HandleMidtransNotification)
@@ -133,6 +134,7 @@ func registerRESTRoutes(
 		admin.Post("/api/v1/admin/menu/bulk", ctrl.CreateMenuItemsBulk)
 		admin.Put("/api/v1/admin/menu/{id}", ctrl.UpdateMenuItem)
 		admin.Put("/api/v1/admin/menu/{id}/availability", ctrl.ToggleMenuItemAvailability)
+		admin.Put("/api/v1/admin/menu/{id}/best-seller", ctrl.ToggleMenuItemBestSeller)
 		admin.Delete("/api/v1/admin/menu/{id}", ctrl.DeleteMenuItem)
 
 		admin.Get("/api/v1/admin/settings", ctrl.GetBranchSettings)

@@ -91,6 +91,9 @@ type MenuItem struct {
 	Tag         *string   `json:"tag,omitempty"`
 	IsAvailable bool      `json:"is_available"`
 	SortOrder   int       `json:"sort_order"`
+	IsBestSeller bool     `json:"is_best_seller"`
+	BranchName  string    `json:"branch_name,omitempty"`
+	BranchSlug  string    `json:"branch_slug,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

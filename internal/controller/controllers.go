@@ -344,6 +344,31 @@ func (c *Controller) ListMenuByBranch(w http.ResponseWriter, r *http.Request) {
 	ok(w, items)
 }
 
+func (c *Controller) ListBestSellers(w http.ResponseWriter, r *http.Request) {
+	branchQuery := r.URL.Query().Get("branch")
+	var branchID *uuid.UUID
+	if branchQuery != "" {
+		id, err := uuid.Parse(branchQuery)
+		if err != nil {
+			b, lookupErr := c.svc.GetBranchBySlug(r.Context(), branchQuery)
+			if lookupErr != nil {
+				writeError(w, lookupErr)
+				return
+			}
+			branchID = &b.ID
+		} else {
+			branchID = &id
+		}
+	}
+
+	items, err := c.svc.ListBestSellers(r.Context(), branchID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, items)
+}
+
 func (c *Controller) CreateMenuItem(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateMenuItemRequest
 	if err := decode(w, r, &req); err != nil {
@@ -412,6 +437,26 @@ func (c *Controller) ToggleMenuItemAvailability(w http.ResponseWriter, r *http.R
 		return
 	}
 	ok(w, map[string]any{"id": id, "is_available": req.IsAvailable})
+}
+
+func (c *Controller) ToggleMenuItemBestSeller(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req dto.ToggleBestSellerRequest
+	if err := decode(w, r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	if err := c.svc.ToggleMenuBestSeller(r.Context(), actor(r), id, req.IsBestSeller); err != nil {
+		writeError(w, err)
+		return
+	}
+	ok(w, map[string]any{"id": id, "is_best_seller": req.IsBestSeller})
 }
 
 func (c *Controller) DeleteMenuItem(w http.ResponseWriter, r *http.Request) {

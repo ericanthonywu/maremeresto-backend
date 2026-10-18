@@ -462,6 +462,7 @@ func (s *Service) CreateMenuItem(ctx context.Context, actor *middleware.JWTClaim
 		IconBgClass: defaultIfEmpty(req.IconBgClass, "bg-amber-50"),
 		IsAvailable: req.IsAvailable,
 		SortOrder:   req.SortOrder,
+		IsBestSeller: req.IsBestSeller,
 	}
 	if req.Tag != "" {
 		tag := req.Tag
@@ -550,6 +551,9 @@ func (s *Service) UpdateMenuItem(ctx context.Context, actor *middleware.JWTClaim
 	if req.SortOrder != nil {
 		item.SortOrder = *req.SortOrder
 	}
+	if req.IsBestSeller != nil {
+		item.IsBestSeller = *req.IsBestSeller
+	}
 
 	if err := s.repo.UpdateMenuItem(ctx, item); err != nil {
 		return nil, err
@@ -562,6 +566,17 @@ func (s *Service) ToggleMenuAvailability(ctx context.Context, actor *middleware.
 		return err
 	}
 	return s.repo.ToggleMenuItemAvailability(ctx, itemID, isAvailable)
+}
+
+func (s *Service) ToggleMenuBestSeller(ctx context.Context, actor *middleware.JWTClaims, itemID uuid.UUID, isBestSeller bool) error {
+	if _, err := s.loadWritableMenuItem(ctx, actor, itemID); err != nil {
+		return err
+	}
+	return s.repo.ToggleMenuItemBestSeller(ctx, itemID, isBestSeller)
+}
+
+func (s *Service) ListBestSellers(ctx context.Context, branchID *uuid.UUID) ([]model.MenuItem, error) {
+	return s.repo.ListBestSellerMenuItems(ctx, branchID)
 }
 
 func (s *Service) DeleteMenuItem(ctx context.Context, actor *middleware.JWTClaims, id uuid.UUID) error {
