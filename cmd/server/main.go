@@ -64,8 +64,15 @@ func main() {
 	r := router.NewRouter(cfg, ctrl, alertSvc)
 
 	// 5. HTTP Server setup with graceful shutdown
+	bindAddr := fmt.Sprintf(":%s", cfg.Port)
+	if cfg.IsProduction() {
+		// In production, bind strictly to loopback interface so traffic cannot
+		// bypass Nginx edge rate-limiting and TLS encryption.
+		bindAddr = fmt.Sprintf("127.0.0.1:%s", cfg.Port)
+	}
+
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%s", cfg.Port),
+		Addr:              bindAddr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -78,7 +85,7 @@ func main() {
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		slog.Info("HTTP server listening", "port", cfg.Port, "url", fmt.Sprintf("http://localhost:%s", cfg.Port))
+		slog.Info("HTTP server listening", "addr", bindAddr)
 		serverErrors <- server.ListenAndServe()
 	}()
 
