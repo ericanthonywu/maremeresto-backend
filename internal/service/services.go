@@ -988,6 +988,16 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 		return nil, err
 	}
 
+	// Close the payment side too, so a Snap page the customer still has open
+	// cannot take money for an order that is now dead. If it slips through
+	// anyway, the settlement notification triggers an automatic refund.
+	if (newStatus == "cancelled" || newStatus == "rejected") && order.Payment != nil && order.Payment.Status == "pending" {
+		if err := s.expireMidtransSession(ctx, order.Payment.MidtransOrderID); err != nil {
+			slog.WarnContext(ctx, "could not expire midtrans session for closed order",
+				"order_id", orderID, "midtrans_order_id", order.Payment.MidtransOrderID, "err", err)
+		}
+	}
+
 	updated, err := s.repo.FindOrderByID(ctx, orderID)
 	if err != nil || updated == nil {
 		// The write succeeded; failing to re-read it must not look like a failure.
@@ -1298,11 +1308,22 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		}
 	}
 
+	// Midtrans never lets an order_id be reused, even after expiry, and
+	// payments.order_id is unique. The first attempt uses the plain order
+	// number; a retry gets a fresh gateway id and takes over the same row.
+	midtransOrderID := order.OrderNumber
+	if existingP != nil {
+		if err := s.retirePaymentAttempt(ctx, existingP); err != nil {
+			return nil, err
+		}
+		midtransOrderID = retryMidtransOrderID(order.OrderNumber)
+	}
+
 	expiresAt := time.Now().Add(paymentWindow)
 
 	snapReq := &snap.Request{
 		TransactionDetails: midtrans.TransactionDetails{
-			OrderID:  order.OrderNumber,
+			OrderID:  midtransOrderID,
 			GrossAmt: int64(computedGrandTotal),
 		},
 		CustomerDetail: &midtrans.CustomerDetails{
@@ -1340,7 +1361,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 
 	payment := &model.Payment{
 		OrderID:         order.ID,
-		MidtransOrderID: order.OrderNumber,
+		MidtransOrderID: midtransOrderID,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentType:     req.PaymentMethod,
 		Status:          "pending",
@@ -1351,7 +1372,12 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		ExpiresAt:       expiresAt,
 	}
 
-	if err := s.repo.CreatePayment(ctx, tx, payment); err != nil {
+	if existingP != nil {
+		err = s.repo.ReplacePayment(ctx, tx, payment)
+	} else {
+		err = s.repo.CreatePayment(ctx, tx, payment)
+	}
+	if err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1359,6 +1385,56 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 	}
 
 	return payment, nil
+}
+
+// retryMidtransOrderID derives a gateway order id for a repeat payment attempt.
+// Midtrans caps order ids at 50 characters; order numbers are well under that.
+func retryMidtransOrderID(orderNumber string) string {
+	return orderNumber + "-" + strconv.FormatInt(time.Now().Unix(), 36)
+}
+
+// retirePaymentAttempt makes sure a previous attempt can no longer be paid
+// before a replacement session is opened. If the customer actually paid it, the
+// payment is reconciled and ErrOrderAlreadyPaid is returned instead.
+func (s *Service) retirePaymentAttempt(ctx context.Context, p *model.Payment) error {
+	if p.Status != "pending" {
+		return nil // already expired or cancelled at the gateway
+	}
+
+	payload, err := s.fetchMidtransStatus(ctx, p.MidtransOrderID)
+	if err != nil {
+		slog.ErrorContext(ctx, "could not check previous midtrans attempt", "midtrans_order_id", p.MidtransOrderID, "err", err)
+		return apperror.ErrMidtransFailed
+	}
+
+	txStatus, _ := payload["transaction_status"].(string)
+	switch txStatus {
+	case "settlement", "capture":
+		if err := s.reconcileMidtransPayload(ctx, payload); err != nil {
+			return err
+		}
+		return apperror.ErrOrderAlreadyPaid
+	case "pending":
+		if err := s.expireMidtransSession(ctx, p.MidtransOrderID); err != nil {
+			slog.ErrorContext(ctx, "could not expire previous midtrans attempt", "midtrans_order_id", p.MidtransOrderID, "err", err)
+			return apperror.ErrMidtransFailed
+		}
+	}
+	return nil
+}
+
+// expireMidtransSession invalidates a not-yet-paid transaction so the customer
+// cannot pay it later. A transaction Midtrans has never seen (the Snap page was
+// opened but no channel chosen) reports 404 and counts as already inert.
+func (s *Service) expireMidtransSession(ctx context.Context, midtransOrderID string) error {
+	payload, err := s.midtransPost(ctx, midtransOrderID, "expire", nil, 10*time.Second)
+	if err != nil {
+		if code, _ := payload["status_code"].(string); code == "404" {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // orderLockKey derives a 64-bit advisory-lock key from the order id; a 32-bit
@@ -1494,24 +1570,24 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 		return apperror.Invalid("order_id kosong pada notifikasi")
 	}
 
-	order, err := s.repo.FindOrderByOrderNumber(ctx, orderID)
-	if err != nil {
-		return err
-	}
-	if order == nil {
-		slog.WarnContext(ctx, "midtrans notification for unknown order", "order_id", orderID)
-		return apperror.ErrNotFound
-	}
-
 	// Only act on a transaction this server actually opened. Without a
 	// payment row there is nothing to reconcile, and advancing the order
-	// would accept an unpaid basket.
-	payment, err := s.repo.FindPaymentByOrderID(ctx, order.ID)
+	// would accept an unpaid basket. The gateway id is looked up directly
+	// because a retried payment no longer uses the plain order number.
+	payment, err := s.repo.FindPaymentByMidtransOrderID(ctx, orderID)
 	if err != nil {
 		return err
 	}
 	if payment == nil {
-		slog.WarnContext(ctx, "midtrans notification for an order with no payment record", "order_id", orderID)
+		slog.WarnContext(ctx, "midtrans notification for an unknown transaction", "order_id", orderID)
+		return apperror.ErrNotFound
+	}
+	order, err := s.repo.FindOrderByID(ctx, payment.OrderID)
+	if err != nil {
+		return err
+	}
+	if order == nil {
+		slog.WarnContext(ctx, "midtrans notification for a payment whose order is gone", "order_id", orderID)
 		return apperror.ErrNotFound
 	}
 
@@ -1538,6 +1614,15 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 
 	newPaymentStatus, paidAt := determinePaymentStatus(txStatus, fraudStatus, time.Now())
 
+	// Notifications can arrive late or twice. A settled payment never moves
+	// backwards and a refunded one is final; the UPDATE enforces the same rule
+	// in SQL so a concurrent notification cannot slip past this check.
+	if payment.Status == "refund" || (payment.Status == "settlement" && newPaymentStatus != "settlement") {
+		slog.InfoContext(ctx, "ignoring stale midtrans notification",
+			"order_id", orderID, "payment_status", payment.Status, "notification", txStatus)
+		return nil
+	}
+
 	tx, err := s.repo.DB().Begin(ctx)
 	if err != nil {
 		return err
@@ -1562,9 +1647,6 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 			} else {
 				advanced = true
 			}
-		} else if order.Status == "cancelled" || order.Status == "rejected" {
-			slog.WarnContext(ctx, "settlement received for non-pending order",
-				"order_id", orderID, "order_status", order.Status)
 		}
 	}
 
@@ -1585,19 +1667,38 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 		s.hub.Broadcast(ws.BranchRoom(freshOrder.BranchID), "order_paid", freshOrder)
 		s.hub.Broadcast(ws.RoomOwner, "new_order", freshOrder)
 		s.hub.Broadcast(ws.RoomOwner, "order_paid", freshOrder)
+		return nil
 	}
 
+	if newPaymentStatus == "settlement" {
+		return s.refundIfOrderClosed(ctx, order.ID)
+	}
 	return nil
 }
 
-// SyncPaymentWithMidtrans actively polls Midtrans status API to reconcile pending payments
-func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber string) (*model.Payment, error) {
-	baseURL := "https://api.sandbox.midtrans.com"
-	if s.cfg.MidtransIsProd {
-		baseURL = "https://api.midtrans.com"
+// refundIfOrderClosed handles money that arrives for an order staff or the
+// customer already cancelled or rejected (the Snap page was still open). The
+// customer must not be left charged for an order that will never be made, so
+// the payment is refunded straight away. A failure is returned so Midtrans
+// retries the notification; the stable refund key keeps retries idempotent.
+func (s *Service) refundIfOrderClosed(ctx context.Context, orderID uuid.UUID) error {
+	order, err := s.repo.FindOrderByID(ctx, orderID)
+	if err != nil {
+		return err
+	}
+	if order == nil || (order.Status != "cancelled" && order.Status != "rejected") || !order.Payment.Refundable() {
+		return nil
 	}
 
-	reqURL := fmt.Sprintf("%s/v2/%s/status", baseURL, url.PathEscape(orderNumber))
+	slog.WarnContext(ctx, "payment settled for a closed order, refunding",
+		"order_id", order.ID, "order_number", order.OrderNumber, "order_status", order.Status)
+	_, err = s.refundOrder(ctx, order, 0, "Pembayaran diterima setelah pesanan dibatalkan", nil)
+	return err
+}
+
+// fetchMidtransStatus asks Midtrans for the current state of one transaction.
+func (s *Service) fetchMidtransStatus(ctx context.Context, midtransOrderID string) (map[string]any, error) {
+	reqURL := fmt.Sprintf("%s/v2/%s/status", s.midtransBaseURL(), url.PathEscape(midtransOrderID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -1620,13 +1721,18 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
+	return payload, nil
+}
 
-	if txStatus, _ := payload["transaction_status"].(string); txStatus == "settlement" || txStatus == "capture" {
-		if err := s.reconcileMidtransPayload(ctx, payload); err != nil {
-			slog.WarnContext(ctx, "sync midtrans payload reconciliation returned error", "err", err)
-		}
+func (s *Service) midtransBaseURL() string {
+	if s.cfg.MidtransIsProd {
+		return "https://api.midtrans.com"
 	}
+	return "https://api.sandbox.midtrans.com"
+}
 
+// SyncPaymentWithMidtrans actively polls Midtrans status API to reconcile pending payments
+func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber string) (*model.Payment, error) {
 	order, err := s.repo.FindOrderByOrderNumber(ctx, orderNumber)
 	if err != nil {
 		return nil, err
@@ -1641,7 +1747,19 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 	if payment == nil {
 		return nil, apperror.ErrNotFound
 	}
-	return payment, nil
+
+	payload, err := s.fetchMidtransStatus(ctx, payment.MidtransOrderID)
+	if err != nil {
+		return nil, err
+	}
+
+	if txStatus, _ := payload["transaction_status"].(string); txStatus == "settlement" || txStatus == "capture" {
+		if err := s.reconcileMidtransPayload(ctx, payload); err != nil {
+			slog.WarnContext(ctx, "sync midtrans payload reconciliation returned error", "err", err)
+		}
+	}
+
+	return s.repo.FindPaymentByOrderID(ctx, order.ID)
 }
 
 // RefundPayment is the admin-portal counterpart to CreatePayment: staff issue
@@ -1662,6 +1780,13 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 	if order.Version != expectedVersion {
 		return nil, apperror.ErrConcurrentModification
 	}
+	return s.refundOrder(ctx, order, amount, reason, &actorID)
+}
+
+// refundOrder refunds a settled payment through Midtrans and moves the order to
+// "refunded". A zero amount means the full remaining balance. actorID is nil for
+// system-initiated refunds. The order's current version is used for the write.
+func (s *Service) refundOrder(ctx context.Context, order *model.Order, amount int, reason string, actorID *uuid.UUID) (*model.Order, error) {
 	if order.Status == "refunded" {
 		return nil, apperror.Invalid("pesanan ini sudah direfund")
 	}
@@ -1684,7 +1809,7 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 	// Midtrans as the same refund rather than a second one.
 	refundKey := order.OrderNumber + "-refund"
 
-	response, refundErr := s.midtransRefund(ctx, order.OrderNumber, refundKey, amount, reason)
+	response, refundErr := s.midtransRefund(ctx, order.Payment.MidtransOrderID, refundKey, amount, reason)
 	if refundErr != nil {
 		slog.ErrorContext(ctx, "midtrans refund failed", "order_number", order.OrderNumber, "err", refundErr)
 		return nil, fmt.Errorf("%w", apperror.ErrMidtransFailed)
@@ -1692,7 +1817,7 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 
 	// Midtrans has already moved the money. From here a failure must be loud:
 	// the gateway and our records now disagree and staff have to reconcile.
-	if err := s.recordRefund(ctx, order, amount, reason, actorID, expectedVersion, response); err != nil {
+	if err := s.recordRefund(ctx, order, amount, reason, actorID, order.Version, response); err != nil {
 		slog.ErrorContext(ctx, "refund issued at midtrans but not recorded locally",
 			"order_number", order.OrderNumber, "amount", amount, "refund_key", refundKey,
 			"midtrans_response", response, "err", err)
@@ -1710,14 +1835,14 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 	return updated, nil
 }
 
-func (s *Service) recordRefund(ctx context.Context, order *model.Order, amount int, reason string, actorID uuid.UUID, expectedVersion int, response map[string]any) error {
+func (s *Service) recordRefund(ctx context.Context, order *model.Order, amount int, reason string, actorID *uuid.UUID, expectedVersion int, response map[string]any) error {
 	tx, err := s.repo.DB().Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := s.repo.RecordRefund(ctx, tx, order.ID, amount, reason, &actorID, response); err != nil {
+	if err := s.repo.RecordRefund(ctx, tx, order.ID, amount, reason, actorID, response); err != nil {
 		return err
 	}
 	if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "refunded", reason, expectedVersion); err != nil {
@@ -1728,23 +1853,29 @@ func (s *Service) recordRefund(ctx context.Context, order *model.Order, amount i
 
 // midtransRefund calls Midtrans's Core API refund endpoint directly: the
 // snap-go SDK used for CreateTransaction has no refund support of its own.
-func (s *Service) midtransRefund(ctx context.Context, orderNumber, refundKey string, amount int, reason string) (map[string]any, error) {
-	baseURL := "https://api.sandbox.midtrans.com"
-	if s.cfg.MidtransIsProd {
-		baseURL = "https://api.midtrans.com"
-	}
-
-	body, err := json.Marshal(map[string]any{
+func (s *Service) midtransRefund(ctx context.Context, midtransOrderID, refundKey string, amount int, reason string) (map[string]any, error) {
+	return s.midtransPost(ctx, midtransOrderID, "refund", map[string]any{
 		"refund_key": refundKey,
 		"amount":     amount,
 		"reason":     reason,
-	})
-	if err != nil {
-		return nil, err
+	}, 10*time.Second)
+}
+
+// midtransPost sends a Core API action (refund, expire, ...) for one
+// transaction. On a rejected call the decoded payload is returned alongside the
+// error so callers can inspect Midtrans's status_code.
+func (s *Service) midtransPost(ctx context.Context, midtransOrderID, action string, body map[string]any, timeout time.Duration) (map[string]any, error) {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(raw)
 	}
 
-	reqURL := fmt.Sprintf("%s/v2/%s/refund", baseURL, url.PathEscape(orderNumber))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	reqURL := fmt.Sprintf("%s/v2/%s/%s", s.midtransBaseURL(), url.PathEscape(midtransOrderID), action)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -1752,7 +1883,7 @@ func (s *Service) midtransRefund(ctx context.Context, orderNumber, refundKey str
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -1761,13 +1892,13 @@ func (s *Service) midtransRefund(ctx context.Context, orderNumber, refundKey str
 
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("midtrans refund returned %d and an unreadable body", resp.StatusCode)
+		return nil, fmt.Errorf("midtrans %s returned %d and an unreadable body", action, resp.StatusCode)
 	}
 
 	statusCode, _ := payload["status_code"].(string)
 	if resp.StatusCode >= 300 || (statusCode != "" && statusCode != "200" && statusCode != "201") {
 		msg, _ := payload["status_message"].(string)
-		return payload, fmt.Errorf("midtrans refund rejected (http %d, status_code %s): %s", resp.StatusCode, statusCode, msg)
+		return payload, fmt.Errorf("midtrans %s rejected (http %d, status_code %s): %s", action, resp.StatusCode, statusCode, msg)
 	}
 
 	return payload, nil

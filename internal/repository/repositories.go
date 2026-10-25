@@ -816,9 +816,10 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 
 	// Fetch payment
 	p, err := r.FindPaymentByOrderID(ctx, o.ID)
-	if err == nil && p != nil {
-		o.Payment = p
+	if err != nil {
+		return nil, err
 	}
+	o.Payment = p
 	feedback, err := r.FindOrderFeedback(ctx, o.ID)
 	if err != nil {
 		return nil, err
@@ -1429,6 +1430,31 @@ func (r *Repository) FindPaymentByOrderID(ctx context.Context, orderID uuid.UUID
 	return &p, nil
 }
 
+// FindPaymentByMidtransOrderID resolves a gateway notification to its payment.
+func (r *Repository) FindPaymentByMidtransOrderID(ctx context.Context, midtransOrderID string) (*model.Payment, error) {
+	query := `
+		SELECT id, order_id, midtrans_order_id, payment_method, payment_type, status, amount,
+		       idempotency_key, snap_token, snap_redirect_url, qr_string, midtrans_transaction_id,
+		       paid_at, expires_at, refund_amount, refund_reason, refunded_at, refunded_by,
+		       created_at, updated_at
+		FROM payments WHERE midtrans_order_id = $1
+	`
+	var p model.Payment
+	err := r.db.QueryRow(ctx, query, midtransOrderID).Scan(
+		&p.ID, &p.OrderID, &p.MidtransOrderID, &p.PaymentMethod, &p.PaymentType, &p.Status, &p.Amount,
+		&p.IdempotencyKey, &p.SnapToken, &p.SnapRedirectURL, &p.QRString, &p.MidtransTransactionID,
+		&p.PaidAt, &p.ExpiresAt, &p.RefundAmount, &p.RefundReason, &p.RefundedAt, &p.RefundedBy,
+		&p.CreatedAt, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func (r *Repository) FindPaymentByIdempotencyKey(ctx context.Context, key string) (*model.Payment, error) {
 	query := `
 		SELECT id, order_id, midtrans_order_id, payment_method, payment_type, status, amount,
@@ -1465,6 +1491,30 @@ func (r *Repository) CreatePayment(ctx context.Context, tx pgx.Tx, p *model.Paym
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
+// ReplacePayment starts a new payment attempt on an order whose previous
+// attempt expired or was cancelled. payments.order_id is unique, so the row is
+// reused rather than a second one inserted. A settled or refunded payment is
+// never overwritten.
+func (r *Repository) ReplacePayment(ctx context.Context, tx pgx.Tx, p *model.Payment) error {
+	query := `
+		UPDATE payments
+		SET midtrans_order_id = $1, payment_method = $2, payment_type = $3, status = $4, amount = $5,
+		    idempotency_key = $6, snap_token = $7, snap_redirect_url = $8, qr_string = $9,
+		    midtrans_transaction_id = NULL, midtrans_response = NULL, paid_at = NULL,
+		    expires_at = $10, updated_at = NOW()
+		WHERE order_id = $11 AND status IN ('pending', 'expire', 'cancel')
+		RETURNING id, created_at, updated_at
+	`
+	err := tx.QueryRow(ctx, query,
+		p.MidtransOrderID, p.PaymentMethod, p.PaymentType, p.Status, p.Amount,
+		p.IdempotencyKey, p.SnapToken, p.SnapRedirectURL, p.QRString, p.ExpiresAt, p.OrderID,
+	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperror.Conflict("status pembayaran berubah, silakan muat ulang")
+	}
+	return err
+}
+
 func (r *Repository) UpdatePaymentStatus(ctx context.Context, tx pgx.Tx, midtransOrderID string, status string, txID string, responseJSON map[string]any, paidAt *time.Time) error {
 	jsonBytes, err := json.Marshal(responseJSON)
 	if err != nil {
@@ -1472,8 +1522,11 @@ func (r *Repository) UpdatePaymentStatus(ctx context.Context, tx pgx.Tx, midtran
 	}
 	query := `
 		UPDATE payments
-		SET status = $1, midtrans_transaction_id = $2, midtrans_response = $3, paid_at = $4, updated_at = NOW()
+		SET status = $1, midtrans_transaction_id = $2, midtrans_response = $3,
+		    paid_at = COALESCE(paid_at, $4), updated_at = NOW()
 		WHERE midtrans_order_id = $5
+		  AND status <> 'refund'
+		  AND (status <> 'settlement' OR $1::text = 'settlement')
 	`
 	_, err = tx.Exec(ctx, query, status, txID, jsonBytes, paidAt, midtransOrderID)
 	return err
