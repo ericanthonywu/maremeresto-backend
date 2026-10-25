@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -76,7 +75,7 @@ func TestUploadAndCompressImage_Success(t *testing.T) {
 		t.Fatalf("failed to create multipart header: %v", err)
 	}
 
-	url, err := svc.UploadAndCompressImage(context.Background(), fileHeader)
+	url, err := svc.UploadAndCompressImage(fileHeader)
 	if err != nil {
 		t.Fatalf("UploadAndCompressImage failed: %v", err)
 	}
@@ -114,7 +113,7 @@ func TestUploadAndCompressImage_InvalidImageRejection(t *testing.T) {
 		t.Fatalf("failed to create multipart header: %v", err)
 	}
 
-	url, err := svc.UploadAndCompressImage(context.Background(), fileHeader)
+	url, err := svc.UploadAndCompressImage(fileHeader)
 	if err == nil {
 		t.Fatalf("expected error for invalid image, got url: %s", url)
 	}

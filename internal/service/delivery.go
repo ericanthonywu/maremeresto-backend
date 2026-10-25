@@ -117,12 +117,18 @@ func defaultSettings(branchID uuid.UUID) *model.BranchSettings {
 	}
 }
 
-func (s *Service) settingsFor(ctx context.Context, branchID uuid.UUID) *model.BranchSettings {
+// settingsFor returns the branch's settings, or the defaults when it has none.
+// A lookup failure is returned rather than masked: silently pricing an order
+// with default fees would charge the customer the wrong amount.
+func (s *Service) settingsFor(ctx context.Context, branchID uuid.UUID) (*model.BranchSettings, error) {
 	set, err := s.repo.FindSettingsByBranchID(ctx, branchID)
-	if err != nil || set == nil {
-		return defaultSettings(branchID)
+	if err != nil {
+		return nil, err
 	}
-	return set
+	if set == nil {
+		return defaultSettings(branchID), nil
+	}
+	return set, nil
 }
 
 // QuoteDelivery prices delivery from every branch to the given coordinate. The
@@ -152,7 +158,10 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 	nearestIdx := -1
 
 	for _, b := range branches {
-		set := s.settingsFor(ctx, b.ID)
+		set, err := s.settingsFor(ctx, b.ID)
+		if err != nil {
+			return nil, err
+		}
 		distance := RoadDistanceKm(req.Lat, req.Lon, b.Latitude, b.Longitude)
 		fee := DeliveryFee(set, distance, req.Subtotal, orderType)
 

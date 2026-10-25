@@ -9,11 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
+	"hash/fnv"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
 	"log/slog"
 	"math"
 	"mime/multipart"
@@ -36,6 +37,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/midtrans/midtrans-go"
 	"github.com/midtrans/midtrans-go/snap"
 	"golang.org/x/crypto/bcrypt"
@@ -323,7 +325,10 @@ func (s *Service) GetBranchBySlug(ctx context.Context, slug string) (*model.Bran
 		return nil, apperror.ErrNotFound
 	}
 
-	set := s.settingsFor(ctx, b.ID)
+	set, err := s.settingsFor(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	b.IsOpenNow = b.IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 	b.TodayHours = FormatOperatingHours(set.OperatingHours, now)
@@ -361,6 +366,8 @@ func slugify(val string) string {
 	return res
 }
 
+const pgUniqueViolation = "23505" // SQLSTATE for a unique constraint violation
+
 func (s *Service) CreateCategory(ctx context.Context, req *dto.CreateCategoryRequest) (*model.Category, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -368,31 +375,45 @@ func (s *Service) CreateCategory(ctx context.Context, req *dto.CreateCategoryReq
 	baseSlug := slugify(req.Name)
 	slug := baseSlug
 	suffix := 1
-	for {
-		exists, err := s.repo.CategorySlugExists(ctx, slug, nil)
-		if err != nil {
-			return nil, err
+
+	// The existence check and the insert are not atomic, so a concurrent create
+	// can take the slug in between; on a unique violation pick the next suffix.
+	for attempt := 0; attempt < maxSlugAttempts; attempt++ {
+		for {
+			exists, err := s.repo.CategorySlugExists(ctx, slug, nil)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				break
+			}
+			slug = fmt.Sprintf("%s-%d", baseSlug, suffix)
+			suffix++
 		}
-		if !exists {
-			break
+
+		cat := &model.Category{
+			ID:        uuid.New(),
+			Name:      req.Name,
+			Slug:      slug,
+			Emoji:     req.Emoji,
+			SortOrder: req.SortOrder,
+			CreatedAt: time.Now(),
+		}
+		err := s.repo.CreateCategory(ctx, cat)
+		if err == nil {
+			return cat, nil
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != pgUniqueViolation {
+			return nil, err
 		}
 		slug = fmt.Sprintf("%s-%d", baseSlug, suffix)
 		suffix++
 	}
-
-	cat := &model.Category{
-		ID:        uuid.New(),
-		Name:      req.Name,
-		Slug:      slug,
-		Emoji:     req.Emoji,
-		SortOrder: req.SortOrder,
-		CreatedAt: time.Now(),
-	}
-	if err := s.repo.CreateCategory(ctx, cat); err != nil {
-		return nil, err
-	}
-	return cat, nil
+	return nil, apperror.Conflict("gagal membuat slug kategori unik, silakan coba lagi")
 }
+
+const maxSlugAttempts = 5
 
 func (s *Service) UpdateCategory(ctx context.Context, id uuid.UUID, req *dto.UpdateCategoryRequest) (*model.Category, error) {
 	if err := req.Validate(); err != nil {
@@ -440,6 +461,19 @@ func (s *Service) ListMenuByBranch(ctx context.Context, branchID uuid.UUID) ([]m
 // CreateMenuItem adds an item. A branch admin may only write to their own
 // outlet; the owner must name the branch explicitly.
 func (s *Service) CreateMenuItem(ctx context.Context, actor *middleware.JWTClaims, req *dto.CreateMenuItemRequest) (*model.MenuItem, error) {
+	item, err := s.prepareMenuItem(ctx, actor, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateMenuItem(ctx, item); err != nil {
+		return nil, err
+	}
+	return s.repo.FindMenuItemByID(ctx, item.ID)
+}
+
+// prepareMenuItem validates the request, resolves the target outlet and builds
+// the model without persisting it.
+func (s *Service) prepareMenuItem(ctx context.Context, actor *middleware.JWTClaims, req *dto.CreateMenuItemRequest) (*model.MenuItem, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -453,15 +487,15 @@ func (s *Service) CreateMenuItem(ctx context.Context, actor *middleware.JWTClaim
 	}
 
 	item := &model.MenuItem{
-		BranchID:    branchID,
-		CategoryID:  req.CategoryID,
-		Name:        req.Name,
-		Description: req.Description,
-		Price:       req.Price,
-		Icon:        defaultIfEmpty(req.Icon, "fa-mug-hot"),
-		IconBgClass: defaultIfEmpty(req.IconBgClass, "bg-amber-50"),
-		IsAvailable: req.IsAvailable,
-		SortOrder:   req.SortOrder,
+		BranchID:     branchID,
+		CategoryID:   req.CategoryID,
+		Name:         req.Name,
+		Description:  req.Description,
+		Price:        req.Price,
+		Icon:         defaultIfEmpty(req.Icon, "fa-mug-hot"),
+		IconBgClass:  defaultIfEmpty(req.IconBgClass, "bg-amber-50"),
+		IsAvailable:  req.IsAvailable,
+		SortOrder:    req.SortOrder,
 		IsBestSeller: req.IsBestSeller,
 	}
 	if req.Tag != "" {
@@ -469,29 +503,40 @@ func (s *Service) CreateMenuItem(ctx context.Context, actor *middleware.JWTClaim
 		item.Tag = &tag
 	}
 	if req.ImageURL != "" {
-		url := req.ImageURL
-		item.ImageURL = &url
+		imageURL := req.ImageURL
+		item.ImageURL = &imageURL
 	}
-
-	if err := s.repo.CreateMenuItem(ctx, item); err != nil {
-		return nil, err
-	}
-	return s.repo.FindMenuItemByID(ctx, item.ID)
+	return item, nil
 }
 
-// CreateMenuItemsBulk validates every request row before creating the menu
-// items. The editor uses this for its spreadsheet-style bulk entry action.
+// CreateMenuItemsBulk validates every request row before creating any menu
+// item, then inserts them in one transaction so a failure leaves nothing
+// behind. The editor uses this for its spreadsheet-style bulk entry action.
 func (s *Service) CreateMenuItemsBulk(ctx context.Context, actor *middleware.JWTClaims, req *dto.CreateMenuItemsBulkRequest) ([]model.MenuItem, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	items := make([]model.MenuItem, 0, len(req.Items))
+	prepared := make([]*model.MenuItem, 0, len(req.Items))
 	for i := range req.Items {
-		item, err := s.CreateMenuItem(ctx, actor, &req.Items[i])
+		item, err := s.prepareMenuItem(ctx, actor, &req.Items[i])
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, *item)
+		prepared = append(prepared, item)
+	}
+	if err := s.repo.CreateMenuItems(ctx, prepared); err != nil {
+		return nil, err
+	}
+
+	items := make([]model.MenuItem, 0, len(prepared))
+	for _, p := range prepared {
+		item, err := s.repo.FindMenuItemByID(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		if item != nil {
+			items = append(items, *item)
+		}
 	}
 	return items, nil
 }
@@ -662,7 +707,7 @@ func defaultIfEmpty(v, fallback string) string {
 // ---------------------------------------------------------------------
 // validTransitions is intentionally compact after payment: an outlet either
 // marks the paid order delivered, rejects it, or refunds it through the
-// dedicated refund flow. Historical statuses are normalised by migration 8.
+// dedicated refund flow.
 var validTransitions = map[string][]string{
 	"pending":  {"accepted", "rejected", "cancelled"},
 	"accepted": {"completed", "rejected", "cancelled"},
@@ -689,7 +734,10 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	if branch == nil {
 		return nil, apperror.ErrNotFound
 	}
-	settings := s.settingsFor(ctx, branch.ID)
+	settings, err := s.settingsFor(ctx, branch.ID)
+	if err != nil {
+		return nil, err
+	}
 	if !branch.IsOpen || !IsWithinOperatingHours(settings.OperatingHours, time.Now()) {
 		return nil, apperror.ErrStoreClosed
 	}
@@ -943,6 +991,7 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 	updated, err := s.repo.FindOrderByID(ctx, orderID)
 	if err != nil || updated == nil {
 		// The write succeeded; failing to re-read it must not look like a failure.
+		slog.WarnContext(ctx, "could not re-read order after status update", "order_id", orderID, "err", err)
 		updated = order
 		updated.Status = newStatus
 	}
@@ -1038,14 +1087,18 @@ func (s *Service) GenerateFeedbackAISummary(ctx context.Context, branchID *uuid.
 	branchName := "Semua Cabang (Mareme Group)"
 	if branchID != nil {
 		branch, err := s.repo.FindBranchByID(ctx, *branchID)
-		if err == nil && branch != nil {
-			branchName = branch.Name
+		if err != nil {
+			return nil, err
 		}
+		if branch == nil {
+			return nil, apperror.ErrNotFound
+		}
+		branchName = branch.Name
 	}
 
 	recentReviews, err := s.repo.GetRecentFeedbackForAI(ctx, branchID, 25)
 	if err != nil {
-		recentReviews = nil
+		return nil, err
 	}
 
 	return s.gemini.GenerateFeedbackSummary(ctx, branchName, analytics, recentReviews)
@@ -1096,8 +1149,7 @@ func (s *Service) CancelOrder(ctx context.Context, orderID uuid.UUID) (*model.Or
 		return order, nil
 	}
 
-	// Both conditions must hold. The original used && between them, so an order
-	// that had sat pending for an hour was still cancellable.
+	// Both the status and the time window must allow self-service cancellation.
 	if !statusesCustomerMayCancel[order.Status] {
 		return nil, apperror.Invalid("pesanan sudah diproses dan tidak dapat dibatalkan sendiri, silakan hubungi outlet")
 	}
@@ -1138,7 +1190,11 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 
 	// Replaying the same Idempotency-Key returns the original payment rather
 	// than charging twice.
-	if existing, err := s.repo.FindPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+	existing, err := s.repo.FindPaymentByIdempotencyKey(ctx, req.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
 		if existing.OrderID != req.OrderID {
 			return nil, apperror.Conflict("Idempotency-Key sudah dipakai untuk pesanan lain")
 		}
@@ -1151,14 +1207,19 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Serialise concurrent pay attempts for this order.
-	lockKey := int64(crc32.ChecksumIEEE([]byte(req.OrderID.String())))
+	// Serialise concurrent pay attempts for this order. The lock is held across
+	// the Snap call on purpose: it is what stops two sessions being opened.
+	lockKey := orderLockKey(req.OrderID)
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
 		return nil, err
 	}
 
 	// Re-check idempotency key after acquiring lock to handle concurrent races.
-	if existing, err := s.repo.FindPaymentByIdempotencyKey(ctx, req.IdempotencyKey); err == nil && existing != nil {
+	existing, err = s.repo.FindPaymentByIdempotencyKey(ctx, req.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
 		if existing.OrderID != req.OrderID {
 			return nil, apperror.Conflict("Idempotency-Key sudah dipakai untuk pesanan lain")
 		}
@@ -1193,7 +1254,10 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		if branch == nil {
 			return nil, apperror.ErrNotFound
 		}
-		settings := s.settingsFor(ctx, branch.ID)
+		settings, err := s.settingsFor(ctx, branch.ID)
+		if err != nil {
+			return nil, err
+		}
 		maxRadius := effectiveMaxRadiusKm(settings)
 		distanceKm := RoadDistanceKm(*order.DeliveryLat, *order.DeliveryLon, branch.Latitude, branch.Longitude)
 		if distanceKm > maxRadius {
@@ -1219,7 +1283,11 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		return nil, apperror.Invalid("nominal pembayaran pesanan tidak valid")
 	}
 
-	if existingP, err := s.repo.FindPaymentByOrderID(ctx, req.OrderID); err == nil && existingP != nil {
+	existingP, err := s.repo.FindPaymentByOrderID(ctx, req.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	if existingP != nil {
 		if existingP.Status == "settlement" {
 			return nil, apperror.ErrOrderAlreadyPaid
 		}
@@ -1241,8 +1309,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 			FName: order.CustomerName,
 			Phone: order.CustomerPhone,
 		},
-		Items:           snapItems(order),
-		EnabledPayments: nil, // Allow full Snap channels (QRIS, GoPay, ShopeePay, Bank Transfer, etc.)
+		Items: snapItems(order),
 		Expiry: &snap.ExpiryDetails{
 			Unit:     "minute",
 			Duration: int64(paymentWindow / time.Minute),
@@ -1254,9 +1321,8 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 
 	snapResp, snapErr := s.snapClient.CreateTransaction(snapReq)
 	if snapErr != nil {
-		// Previously this branch invented a token and a QRIS payload and
-		// reported success, so the customer saw "payment created" for a
-		// transaction that did not exist. Surface the failure instead.
+		// Never fabricate a session: report the failure so the customer does not
+		// see "payment created" for a transaction that does not exist.
 		slog.ErrorContext(ctx, "midtrans snap transaction failed",
 			"order_number", order.OrderNumber,
 			"status_code", snapErr.StatusCode,
@@ -1295,22 +1361,17 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 	return payment, nil
 }
 
+// orderLockKey derives a 64-bit advisory-lock key from the order id; a 32-bit
+// checksum made unrelated orders collide and block each other.
+func orderLockKey(orderID uuid.UUID) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write(orderID[:])
+	return int64(h.Sum64())
+}
+
 // paymentWindow is how long a Snap session stays valid. It is mirrored into
 // the Midtrans expiry so both sides agree.
 const paymentWindow = 15 * time.Minute
-
-// enabledPaymentsFor restricts the Snap page to the single channel the
-// customer chose, so the hidden VA and card options cannot reappear.
-func enabledPaymentsFor(method string) []snap.SnapPaymentType {
-	switch method {
-	case "gopay":
-		return []snap.SnapPaymentType{snap.PaymentTypeGopay}
-	case "shopeepay":
-		return []snap.SnapPaymentType{snap.PaymentTypeShopeepay}
-	default:
-		return []snap.SnapPaymentType{snap.SnapPaymentType("other_qris")}
-	}
-}
 
 // snapItems itemises the basket for Midtrans. The line items must sum to
 // gross_amount or Snap rejects the transaction, so fees and discounts are sent
@@ -1514,6 +1575,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 	if advanced {
 		freshOrder, fErr := s.repo.FindOrderByID(ctx, order.ID)
 		if fErr != nil || freshOrder == nil {
+			slog.WarnContext(ctx, "could not re-read order after payment settlement", "order_id", order.ID, "err", fErr)
 			order.Status = "accepted"
 			order.Version++
 			freshOrder = order
@@ -1566,10 +1628,20 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 	}
 
 	order, err := s.repo.FindOrderByOrderNumber(ctx, orderNumber)
-	if err != nil || order == nil {
+	if err != nil {
 		return nil, err
 	}
-	return s.repo.FindPaymentByOrderID(ctx, order.ID)
+	if order == nil {
+		return nil, apperror.ErrNotFound
+	}
+	payment, err := s.repo.FindPaymentByOrderID(ctx, order.ID)
+	if err != nil {
+		return nil, err
+	}
+	if payment == nil {
+		return nil, apperror.ErrNotFound
+	}
+	return payment, nil
 }
 
 // RefundPayment is the admin-portal counterpart to CreatePayment: staff issue
@@ -1618,30 +1690,40 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 		return nil, fmt.Errorf("%w", apperror.ErrMidtransFailed)
 	}
 
-	tx, err := s.repo.DB().Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := s.repo.RecordRefund(ctx, tx, order.ID, amount, reason, &actorID, response); err != nil {
-		return nil, err
-	}
-	if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "refunded", reason, expectedVersion); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
+	// Midtrans has already moved the money. From here a failure must be loud:
+	// the gateway and our records now disagree and staff have to reconcile.
+	if err := s.recordRefund(ctx, order, amount, reason, actorID, expectedVersion, response); err != nil {
+		slog.ErrorContext(ctx, "refund issued at midtrans but not recorded locally",
+			"order_number", order.OrderNumber, "amount", amount, "refund_key", refundKey,
+			"midtrans_response", response, "err", err)
+		return nil, fmt.Errorf("refund berhasil di Midtrans tetapi gagal dicatat (%s), hubungi tim teknis: %w", order.OrderNumber, err)
 	}
 
 	updated, err := s.repo.FindOrderByID(ctx, order.ID)
 	if err != nil || updated == nil {
+		slog.WarnContext(ctx, "could not re-read order after refund", "order_id", order.ID, "err", err)
 		updated = order
 		updated.Status = "refunded"
 	}
 
 	s.broadcastStatus(updated, "Pesanan direfund, dana akan kembali sesuai kebijakan Midtrans/penyedia pembayaran.")
 	return updated, nil
+}
+
+func (s *Service) recordRefund(ctx context.Context, order *model.Order, amount int, reason string, actorID uuid.UUID, expectedVersion int, response map[string]any) error {
+	tx, err := s.repo.DB().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := s.repo.RecordRefund(ctx, tx, order.ID, amount, reason, &actorID, response); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "refunded", reason, expectedVersion); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // midtransRefund calls Midtrans's Core API refund endpoint directly: the
@@ -1749,8 +1831,8 @@ func (s *Service) ValidatePromo(ctx context.Context, req *dto.ValidatePromoReque
 }
 
 // ResolveBranchScope works out which branch an admin request targets. A branch
-// admin is always pinned to their own outlet; the owner must say which one.
-// Previously both fell back to a hardcoded branch UUID.
+// admin is always pinned to their own outlet; the owner may name one, or pass
+// nil to address the whole network.
 func ResolveBranchScope(actor *middleware.JWTClaims, requested *uuid.UUID) (*uuid.UUID, error) {
 	if actor == nil {
 		return nil, apperror.ErrUnauthorized
@@ -1786,21 +1868,21 @@ func (s *Service) UpdateBranchSettings(ctx context.Context, branchID uuid.UUID, 
 		return nil, err
 	}
 
-	settings := &model.BranchSettings{
-		BranchID:              branchID,
-		OperatingHours:        req.OperatingHours,
-		MaxDeliveryRadiusKm:   10,
-		BaseDeliveryFeeNear:   0,
-		BaseDeliveryFeeMid:    8000,
-		BaseDeliveryFeeFar:    12000,
-		NearThresholdKm:       1,
-		MidThresholdKm:        5,
-		ServiceFee:            req.ServiceFee,
-		MinOrderAmount:        req.MinOrderAmount,
-		FreeDeliveryThreshold: 0,
-		WhatsappNumber:        req.WhatsappNumber,
-		HalalCertificateID:    req.HalalCertificateID,
+	// Start from the stored row so delivery pricing the request does not carry
+	// (radius, fee tiers, thresholds) is preserved rather than reset.
+	settings, err := s.repo.FindSettingsByBranchID(ctx, branchID)
+	if err != nil {
+		return nil, err
 	}
+	if settings == nil {
+		return nil, apperror.ErrNotFound
+	}
+	settings.OperatingHours = req.OperatingHours
+	settings.ServiceFee = req.ServiceFee
+	settings.MinOrderAmount = req.MinOrderAmount
+	settings.WhatsappNumber = req.WhatsappNumber
+	settings.HalalCertificateID = req.HalalCertificateID
+	settings.Description = nil
 	if req.Description != "" {
 		settings.Description = &req.Description
 	}
@@ -1816,9 +1898,7 @@ func (s *Service) UpdateBranchStatus(ctx context.Context, branchID uuid.UUID, is
 }
 
 // UpdateBranchProfile lets a branch_admin (own outlet) or owner (any outlet)
-// correct the outlet's public identity. This replaced the previous state
-// where name/address/phone/coordinates could only be set once, at seed time,
-// with no way to fix leftover placeholder data short of a manual DB edit.
+// correct the outlet's public identity: name, address, phone and coordinates.
 func (s *Service) UpdateBranchProfile(ctx context.Context, branchID uuid.UUID, req *dto.UpdateBranchProfileRequest) (*model.Branch, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1832,23 +1912,44 @@ func (s *Service) UpdateBranchProfile(ctx context.Context, branchID uuid.UUID, r
 // ---------------------------------------------------------------------
 // Upload Service (With Auto-Compression)
 // ---------------------------------------------------------------------
-func (s *Service) UploadAndCompressImage(ctx context.Context, fileHeader *multipart.FileHeader) (string, error) {
+const (
+	maxUploadImageBytes  = 8 << 20
+	maxUploadImagePixels = 40_000_000
+)
+
+func (s *Service) UploadAndCompressImage(fileHeader *multipart.FileHeader) (string, error) {
 	src, err := fileHeader.Open()
 	if err != nil {
 		return "", err
 	}
 	defer src.Close()
 
+	if fileHeader.Size > maxUploadImageBytes {
+		return "", apperror.Invalid("gambar terlalu besar (maksimal 8 MB)")
+	}
+
+	// Check the declared dimensions before decoding so a tiny file cannot
+	// expand into gigabytes of pixels.
+	cfg, _, err := image.DecodeConfig(src)
+	if err != nil {
+		return "", apperror.Invalid("format gambar tidak valid atau file rusak")
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxUploadImagePixels {
+		return "", apperror.Invalid("dimensi gambar terlalu besar")
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+
+	img, _, err := image.Decode(src)
+	if err != nil {
+		return "", apperror.Invalid("format gambar tidak valid atau file rusak")
+	}
+
 	// Ensure upload dir exists
 	uploadDir := s.cfg.UploadDir
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return "", err
-	}
-
-	// Decode image
-	img, _, err := image.Decode(src)
-	if err != nil {
-		return "", apperror.Invalid("format gambar tidak valid atau file rusak")
 	}
 
 	// Auto-resize max dimension 800px keeping aspect ratio
@@ -1861,10 +1962,16 @@ func (s *Service) UploadAndCompressImage(ctx context.Context, fileHeader *multip
 	if err != nil {
 		return "", err
 	}
-	defer out.Close()
 
-	err = jpeg.Encode(out, resized, &jpeg.Options{Quality: 80})
-	if err != nil {
+	// A failed encode or close would otherwise leave a truncated file that the
+	// returned URL never points to.
+	if err := jpeg.Encode(out, resized, &jpeg.Options{Quality: 80}); err != nil {
+		_ = out.Close()
+		_ = os.Remove(targetPath)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(targetPath)
 		return "", err
 	}
 
@@ -1964,4 +2071,3 @@ func (s *Service) UpdateBranchCredentials(
 
 	return s.repo.UpsertBranchStaffCredentials(ctx, branchID, req.Username, passwordHash, req.Email, req.Name, req.Phone)
 }
-

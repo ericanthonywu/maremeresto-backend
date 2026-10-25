@@ -47,23 +47,6 @@ func (r *Repository) FindUserByPhone(ctx context.Context, phone string) (*model.
 	return &u, nil
 }
 
-// FindUserByEmail resolves a staff sign-in. Email replaces the hardcoded
-// email->phone switch that previously lived in the service layer.
-func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*model.User, error) {
-	query := `SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at FROM users WHERE LOWER(email) = LOWER($1)`
-	var u model.User
-	err := r.db.QueryRow(ctx, query, email).Scan(
-		&u.ID, &u.Phone, &u.Name, &u.Role, &u.BranchID, &u.PasswordHash, &u.Email, &u.Username, &u.Address, &u.Latitude, &u.Longitude, &u.CreatedAt, &u.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
-}
-
 func (r *Repository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	query := `SELECT id, phone, name, role, branch_id, password_hash, email, username, address, latitude, longitude, created_at, updated_at FROM users WHERE id = $1`
 	var u model.User
@@ -402,7 +385,9 @@ func (r *Repository) ListBranches(ctx context.Context) ([]model.Branch, error) {
 		); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(tagsJSON, &b.FacilityTags)
+		if err := decodeJSON(tagsJSON, &b.FacilityTags); err != nil {
+			return nil, fmt.Errorf("decode facility_tags: %w", err)
+		}
 		branches = append(branches, b)
 	}
 	return branches, nil
@@ -422,7 +407,9 @@ func (r *Repository) FindBranchBySlug(ctx context.Context, slug string) (*model.
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(tagsJSON, &b.FacilityTags)
+	if err := decodeJSON(tagsJSON, &b.FacilityTags); err != nil {
+		return nil, fmt.Errorf("decode facility_tags: %w", err)
+	}
 	return &b, nil
 }
 
@@ -440,7 +427,9 @@ func (r *Repository) FindBranchByID(ctx context.Context, id uuid.UUID) (*model.B
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(tagsJSON, &b.FacilityTags)
+	if err := decodeJSON(tagsJSON, &b.FacilityTags); err != nil {
+		return nil, fmt.Errorf("decode facility_tags: %w", err)
+	}
 	return &b, nil
 }
 
@@ -969,8 +958,8 @@ func (r *Repository) FindOrderFeedback(ctx context.Context, orderID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	if len(itemsFeedbackRaw) > 0 {
-		_ = json.Unmarshal(itemsFeedbackRaw, &feedback.ItemsFeedback)
+	if err := decodeJSON(itemsFeedbackRaw, &feedback.ItemsFeedback); err != nil {
+		return nil, fmt.Errorf("decode items_feedback: %w", err)
 	}
 	if feedback.ItemsFeedback == nil {
 		feedback.ItemsFeedback = []model.OrderItemFeedback{}
@@ -1035,8 +1024,8 @@ func (r *Repository) UpsertOrderFeedback(
 		return nil, err
 	}
 
-	if len(itemsFeedbackRaw) > 0 {
-		_ = json.Unmarshal(itemsFeedbackRaw, &feedback.ItemsFeedback)
+	if err := decodeJSON(itemsFeedbackRaw, &feedback.ItemsFeedback); err != nil {
+		return nil, fmt.Errorf("decode items_feedback: %w", err)
 	}
 	if feedback.ItemsFeedback == nil {
 		feedback.ItemsFeedback = []model.OrderItemFeedback{}
@@ -1477,20 +1466,26 @@ func (r *Repository) CreatePayment(ctx context.Context, tx pgx.Tx, p *model.Paym
 }
 
 func (r *Repository) UpdatePaymentStatus(ctx context.Context, tx pgx.Tx, midtransOrderID string, status string, txID string, responseJSON map[string]any, paidAt *time.Time) error {
-	jsonBytes, _ := json.Marshal(responseJSON)
+	jsonBytes, err := json.Marshal(responseJSON)
+	if err != nil {
+		return fmt.Errorf("encode midtrans response: %w", err)
+	}
 	query := `
 		UPDATE payments
 		SET status = $1, midtrans_transaction_id = $2, midtrans_response = $3, paid_at = $4, updated_at = NOW()
 		WHERE midtrans_order_id = $5
 	`
-	_, err := tx.Exec(ctx, query, status, txID, jsonBytes, paidAt, midtransOrderID)
+	_, err = tx.Exec(ctx, query, status, txID, jsonBytes, paidAt, midtransOrderID)
 	return err
 }
 
 // RecordRefund persists a confirmed Midtrans refund on the payment row.
 // refundedBy is nil-able so a system-initiated refund can still be recorded.
 func (r *Repository) RecordRefund(ctx context.Context, tx pgx.Tx, orderID uuid.UUID, amount int, reason string, refundedBy *uuid.UUID, responseJSON map[string]any) error {
-	jsonBytes, _ := json.Marshal(responseJSON)
+	jsonBytes, err := json.Marshal(responseJSON)
+	if err != nil {
+		return fmt.Errorf("encode midtrans response: %w", err)
+	}
 	query := `
 		UPDATE payments
 		SET status = 'refund', refund_amount = refund_amount + $1, refund_reason = $2,
@@ -1555,12 +1550,17 @@ func (r *Repository) FindSettingsByBranchID(ctx context.Context, branchID uuid.U
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(hoursJSON, &s.OperatingHours)
+	if err := decodeJSON(hoursJSON, &s.OperatingHours); err != nil {
+		return nil, fmt.Errorf("decode operating_hours: %w", err)
+	}
 	return &s, nil
 }
 
 func (r *Repository) UpdateSettings(ctx context.Context, s *model.BranchSettings) error {
-	hoursBytes, _ := json.Marshal(s.OperatingHours)
+	hoursBytes, err := json.Marshal(s.OperatingHours)
+	if err != nil {
+		return fmt.Errorf("encode operating_hours: %w", err)
+	}
 	query := `
 		UPDATE branch_settings
 		SET operating_hours = $1, max_delivery_radius_km = $2, base_delivery_fee_near = $3,
@@ -1766,8 +1766,43 @@ func (r *Repository) ListSettingsByBranch(ctx context.Context) (map[uuid.UUID]mo
 		); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(hoursJSON, &s.OperatingHours)
+		if err := decodeJSON(hoursJSON, &s.OperatingHours); err != nil {
+			return nil, fmt.Errorf("decode operating_hours: %w", err)
+		}
 		out[s.BranchID] = s
 	}
 	return out, rows.Err()
+}
+
+// CreateMenuItems inserts every item in a single transaction: either all rows
+// are created or none are.
+func (r *Repository) CreateMenuItems(ctx context.Context, items []*model.MenuItem) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	query := `
+		INSERT INTO menu_items (branch_id, category_id, name, description, price, icon, icon_bg_class, image_url, tag, is_available, sort_order, is_best_seller)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id, created_at, updated_at
+	`
+	for _, m := range items {
+		if err := tx.QueryRow(ctx, query,
+			m.BranchID, m.CategoryID, m.Name, m.Description, m.Price, m.Icon, m.IconBgClass, m.ImageURL, m.Tag, m.IsAvailable, m.SortOrder, m.IsBestSeller,
+		).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// decodeJSON unmarshals a nullable JSON column. An empty value leaves dst
+// untouched; malformed JSON is reported instead of silently dropped.
+func decodeJSON(raw []byte, dst any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, dst)
 }

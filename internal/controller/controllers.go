@@ -891,8 +891,7 @@ func (c *Controller) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only the customer who placed the order (or staff) may cancel it. This
-	// endpoint previously had no authentication at all.
+	// Only the customer who placed the order (or staff) may cancel it.
 	existing, err := c.svc.GetOrder(r.Context(), id)
 	if err != nil {
 		writeError(w, r, err)
@@ -1084,8 +1083,8 @@ func (c *Controller) UpdateBranchSettings(w http.ResponseWriter, r *http.Request
 	ok(w, settings)
 }
 
-// resolveSettingsBranch previously defaulted to a hardcoded branch UUID, so an
-// owner with no branch_id silently edited the Kerten outlet.
+// resolveSettingsBranch picks the outlet a settings request targets. The owner
+// must name one explicitly; there is no default outlet.
 func (c *Controller) resolveSettingsBranch(r *http.Request) (uuid.UUID, error) {
 	requested, err := queryUUID(r, "branch_id")
 	if err != nil {
@@ -1118,7 +1117,7 @@ func (c *Controller) UploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	url, err := c.svc.UploadAndCompressImage(r.Context(), fileHeader)
+	url, err := c.svc.UploadAndCompressImage(fileHeader)
 	if err != nil {
 		writeError(w, r, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -163,8 +164,8 @@ func (r *Repository) ListOrderFeedbackAdmin(
 		); err != nil {
 			return nil, 0, err
 		}
-		if len(itemsFeedbackRaw) > 0 {
-			_ = json.Unmarshal(itemsFeedbackRaw, &item.ItemsFeedback)
+		if err := decodeJSON(itemsFeedbackRaw, &item.ItemsFeedback); err != nil {
+			return nil, 0, fmt.Errorf("decode items_feedback: %w", err)
 		}
 		if item.ItemsFeedback == nil {
 			item.ItemsFeedback = []model.OrderItemFeedback{}
@@ -289,7 +290,10 @@ func (r *Repository) GetFeedbackAnalytics(ctx context.Context, branchID *uuid.UU
 		// Menu items feedback
 		if len(itemsRaw) > 0 {
 			var items []model.OrderItemFeedback
-			if err := json.Unmarshal(itemsRaw, &items); err == nil {
+			if err := json.Unmarshal(itemsRaw, &items); err != nil {
+				// One malformed row should not take the whole dashboard down.
+				slog.WarnContext(ctx, "skipping feedback row with malformed items_feedback", "err", err)
+			} else {
 				for _, it := range items {
 					if it.ItemName == "" || it.Rating < 1 || it.Rating > 5 {
 						continue
