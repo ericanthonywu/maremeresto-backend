@@ -229,14 +229,14 @@ func (s *Service) AdminLogin(ctx context.Context, identifier, password string) (
 	bcryptErr := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
 
 	if user == nil || user.PasswordHash == nil || bcryptErr != nil {
-		slog.Warn("failed admin login attempt", "identifier", identifier)
+		slog.WarnContext(ctx, "failed admin login attempt", "identifier", identifier)
 		return nil, apperror.ErrUnauthorized
 	}
 	if user.Role != "branch_admin" && user.Role != "owner" {
 		return nil, apperror.ErrUnauthorized
 	}
 	if user.Role == "branch_admin" && user.BranchID == nil {
-		slog.Error("branch admin has no branch assigned", "user_id", user.ID)
+		slog.ErrorContext(ctx, "branch admin has no branch assigned", "user_id", user.ID)
 		return nil, apperror.ErrUnauthorized
 	}
 
@@ -947,6 +947,8 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 		updated.Status = newStatus
 	}
 
+	slog.InfoContext(ctx, "order status updated",
+		"order_id", orderID, "order_number", updated.OrderNumber, "from", order.Status, "to", newStatus)
 	s.broadcastStatus(updated, "")
 	return updated, nil
 }
@@ -1255,7 +1257,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		// Previously this branch invented a token and a QRIS payload and
 		// reported success, so the customer saw "payment created" for a
 		// transaction that did not exist. Surface the failure instead.
-		slog.Error("midtrans snap transaction failed",
+		slog.ErrorContext(ctx, "midtrans snap transaction failed",
 			"order_number", order.OrderNumber,
 			"status_code", snapErr.StatusCode,
 			"message", snapErr.Message,
@@ -1263,7 +1265,7 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		return nil, fmt.Errorf("%w", apperror.ErrMidtransFailed)
 	}
 	if snapResp == nil || snapResp.Token == "" || snapResp.RedirectURL == "" {
-		slog.Error("midtrans returned an empty snap session", "order_number", order.OrderNumber)
+		slog.ErrorContext(ctx, "midtrans returned an empty snap session", "order_number", order.OrderNumber)
 		return nil, apperror.ErrMidtransFailed
 	}
 
@@ -1413,7 +1415,7 @@ func (s *Service) HandleMidtransWebhook(ctx context.Context, payload map[string]
 	}
 
 	if !verifyMidtransSignature(orderID, statusCode, grossAmount, signatureKey, s.cfg.MidtransServerKey) {
-		slog.Warn("rejected midtrans notification with bad signature", "order_id", orderID)
+		slog.WarnContext(ctx, "rejected midtrans notification with bad signature", "order_id", orderID)
 		return apperror.ErrUnauthorized
 	}
 
@@ -1436,7 +1438,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 		return err
 	}
 	if order == nil {
-		slog.Warn("midtrans notification for unknown order", "order_id", orderID)
+		slog.WarnContext(ctx, "midtrans notification for unknown order", "order_id", orderID)
 		return apperror.ErrNotFound
 	}
 
@@ -1448,7 +1450,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 		return err
 	}
 	if payment == nil {
-		slog.Warn("midtrans notification for an order with no payment record", "order_id", orderID)
+		slog.WarnContext(ctx, "midtrans notification for an order with no payment record", "order_id", orderID)
 		return apperror.ErrNotFound
 	}
 
@@ -1458,7 +1460,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 	// through the generic status switch below would wipe paid_at (it only
 	// ever sets it, never preserves it) and stamp over the refund bookkeeping.
 	if txStatus == "refund" || txStatus == "partial_refund" {
-		slog.Info("midtrans refund notification acknowledged", "order_id", orderID, "status", txStatus)
+		slog.InfoContext(ctx, "midtrans refund notification acknowledged", "order_id", orderID, "status", txStatus)
 		return nil
 	}
 
@@ -1466,7 +1468,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 	if grossAmount != "" {
 		if amount, convErr := strconv.ParseFloat(grossAmount, 64); convErr == nil {
 			if int(math.Round(amount)) != order.GrandTotal {
-				slog.Error("midtrans amount mismatch",
+				slog.ErrorContext(ctx, "midtrans amount mismatch",
 					"order_id", orderID, "expected", order.GrandTotal, "received", amount)
 				return apperror.Conflict("jumlah pembayaran tidak sesuai dengan tagihan")
 			}
@@ -1500,7 +1502,7 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 				advanced = true
 			}
 		} else if order.Status == "cancelled" || order.Status == "rejected" {
-			slog.Warn("settlement received for non-pending order",
+			slog.WarnContext(ctx, "settlement received for non-pending order",
 				"order_id", orderID, "order_status", order.Status)
 		}
 	}
@@ -1559,7 +1561,7 @@ func (s *Service) SyncPaymentWithMidtrans(ctx context.Context, orderNumber strin
 
 	if txStatus, _ := payload["transaction_status"].(string); txStatus == "settlement" || txStatus == "capture" {
 		if err := s.reconcileMidtransPayload(ctx, payload); err != nil {
-			slog.Warn("sync midtrans payload reconciliation returned error", "err", err)
+			slog.WarnContext(ctx, "sync midtrans payload reconciliation returned error", "err", err)
 		}
 	}
 
@@ -1612,7 +1614,7 @@ func (s *Service) RefundPayment(ctx context.Context, orderID uuid.UUID, amount i
 
 	response, refundErr := s.midtransRefund(ctx, order.OrderNumber, refundKey, amount, reason)
 	if refundErr != nil {
-		slog.Error("midtrans refund failed", "order_number", order.OrderNumber, "err", refundErr)
+		slog.ErrorContext(ctx, "midtrans refund failed", "order_number", order.OrderNumber, "err", refundErr)
 		return nil, fmt.Errorf("%w", apperror.ErrMidtransFailed)
 	}
 

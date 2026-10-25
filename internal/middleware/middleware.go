@@ -15,6 +15,7 @@ import (
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/logging"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -76,17 +77,21 @@ func AuthRequired(cfg *config.Config, requiredRoles ...string) func(http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := bearerToken(r)
 			if tokenStr == "" {
+				slog.WarnContext(r.Context(), "auth rejected: no token", "path", r.URL.Path)
 				writeAuthError(w, http.StatusUnauthorized, "sesi tidak ditemukan, silakan masuk kembali")
 				return
 			}
 
 			claims, err := ParseToken(cfg, tokenStr)
 			if err != nil {
+				slog.WarnContext(r.Context(), "auth rejected: invalid token", "path", r.URL.Path, "err", err)
 				writeAuthError(w, http.StatusUnauthorized, "sesi tidak valid atau telah berakhir, silakan masuk kembali")
 				return
 			}
 
 			if len(requiredRoles) > 0 && !hasRole(claims.Role, requiredRoles) {
+				slog.WarnContext(r.Context(), "auth rejected: role not permitted",
+					"user_id", claims.UserID, "role", claims.Role, "required", requiredRoles, "path", r.URL.Path)
 				writeAuthError(w, http.StatusForbidden, "akun Anda tidak memiliki izin untuk tindakan ini")
 				return
 			}
@@ -239,6 +244,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		if !rl.allow(clientIP(r)) {
+			slog.WarnContext(r.Context(), "rate limit exceeded", "ip", clientIP(r), "path", r.URL.Path)
 			w.Header().Set("Retry-After", "30")
 			writeAuthError(w, http.StatusTooManyRequests, "terlalu banyak permintaan, silakan tunggu sebentar")
 			return
@@ -326,19 +332,30 @@ func Logger(next http.Handler) http.Handler {
 		start := time.Now()
 		tid := traceID(r)
 		w.Header().Set("X-Trace-Id", tid)
+		// From here on every slog.*Context call made with r.Context() is
+		// tagged with trace_id, including the SQL tracer.
+		r = r.WithContext(logging.WithTraceID(r.Context(), tid))
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 		if rec.status == 0 {
 			rec.status = http.StatusOK
 		}
-		slog.Info("HTTP Request",
-			"trace_id", tid,
+
+		level := slog.LevelInfo
+		switch {
+		case rec.status >= 500:
+			level = slog.LevelError
+		case rec.status >= 400:
+			level = slog.LevelWarn
+		}
+		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
 			"duration", time.Since(start),
 			"ip", clientIP(r),
-		)
+		}
+		slog.Log(r.Context(), level, "HTTP Request", attrs...)
 	})
 }
 
@@ -347,10 +364,13 @@ func Recovery(alertSvc *alert.AlertService) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					tid := traceID(r)
+					tid := logging.TraceID(r.Context())
+					if tid == "" {
+						tid = traceID(r)
+					}
 					stack := string(debug.Stack())
 					errMsg := fmt.Sprintf("%v", rec)
-					slog.Error("PANIC recovered", "trace_id", tid, "error", rec, "path", r.URL.Path)
+					slog.ErrorContext(r.Context(), "PANIC recovered", "err", rec, "path", r.URL.Path, "stack", stack)
 
 					if alertSvc != nil {
 						alertSvc.SendErrorAlert(tid, errMsg, r.URL.Path, stack)

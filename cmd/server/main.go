@@ -16,6 +16,7 @@ import (
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/controller"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/database"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/logging"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/repository"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/router"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/service"
@@ -30,7 +31,7 @@ func main() {
 	if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
 		logLevel = slog.LevelInfo
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(logging.NewHandler(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))))
 
 	slog.Info("Starting Maremereso Olga Backend Server...")
 
