@@ -1,5 +1,6 @@
 # Binaries
 bin/
+admintool
 *.exe
 *.exe~
 *.dll
