@@ -1020,6 +1020,35 @@ func (c *Controller) HandleMidtransNotification(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// HandleBiteshipWebhook acknowledges Biteship verification pings and delivery
+// status/waybill/price callbacks.
+func (c *Controller) HandleBiteshipWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var payload map[string]any
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+	}
+
+	slog.InfoContext(r.Context(), "Biteship webhook received",
+		"method", r.Method,
+		"event", payload["event"],
+		"order_id", payload["order_id"],
+		"status", payload["status"],
+		"courier_waybill_id", payload["courier_waybill_id"],
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "status": "ok"})
+}
+
 // ---------------------------------------------------------------------
 // Promos
 // ---------------------------------------------------------------------

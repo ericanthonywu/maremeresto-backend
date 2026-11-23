@@ -68,6 +68,11 @@ func registerRESTRoutes(
 
 		// Midtrans posts here; the SHA-512 signature is the authentication.
 		public.Post("/api/v1/payments/notification", ctrl.HandleMidtransNotification)
+
+		// Biteship webhook endpoint (handles verification pings and order status callbacks).
+		public.Post("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
+		public.Get("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
+		public.Head("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
 	})
 
 	r.Group(func(limited chi.Router) {
