@@ -64,6 +64,28 @@ func IsSupportedInstantCourier(company string) bool {
 	}
 }
 
+// ShouldFetchBiteshipDriverInfo reports whether the given Biteship status
+// indicates a driver may already be assigned and worth enriching via GetOrder.
+func ShouldFetchBiteshipDriverInfo(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "allocated", "picking_up", "picked", "in_transit", "dropping_off", "delivered":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsBiteshipRedispatchable reports whether a failed/cancelled Biteship order
+// can be dispatched again by staff.
+func IsBiteshipRedispatchable(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "cancelled", "rejected", "courier_not_found", "returned":
+		return true
+	default:
+		return false
+	}
+}
+
 // sanitizePhoneForBiteship normalizes Indonesian contact numbers so Biteship
 // accepts landline or mobile numbers cleanly.
 func sanitizePhoneForBiteship(raw string) string {

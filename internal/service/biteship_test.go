@@ -116,3 +116,38 @@ func TestBiteshipCreateOrderSendsExactOriginAndDestination(t *testing.T) {
 		t.Fatalf("unexpected destination coordinate: %+v", captured.DestinationCoordinate)
 	}
 }
+
+func TestBiteshipStatusHelpers(t *testing.T) {
+	fetchCases := map[string]bool{
+		"confirmed":         false,
+		"scheduled":         false,
+		"allocated":         true,
+		"picking_up":        true,
+		"picked":            true,
+		"in_transit":        true,
+		"dropping_off":      true,
+		"delivered":         true,
+		"cancelled":         false,
+		"courier_not_found": false,
+	}
+	for st, want := range fetchCases {
+		if got := ShouldFetchBiteshipDriverInfo(st); got != want {
+			t.Errorf("ShouldFetchBiteshipDriverInfo(%q) = %v, want %v", st, got, want)
+		}
+	}
+
+	redispatchCases := map[string]bool{
+		"confirmed":         false,
+		"in_transit":        false,
+		"delivered":         false,
+		"cancelled":         true,
+		"rejected":          true,
+		"courier_not_found": true,
+		"returned":          true,
+	}
+	for st, want := range redispatchCases {
+		if got := IsBiteshipRedispatchable(st); got != want {
+			t.Errorf("IsBiteshipRedispatchable(%q) = %v, want %v", st, got, want)
+		}
+	}
+}

@@ -1094,9 +1094,9 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 	if order.BiteshipOrderID != nil && *order.BiteshipOrderID != "" {
 		bs := ""
 		if order.BiteshipStatus != nil {
-			bs = strings.ToLower(strings.TrimSpace(*order.BiteshipStatus))
+			bs = *order.BiteshipStatus
 		}
-		if bs != "cancelled" && bs != "rejected" && bs != "courier_not_found" {
+		if !IsBiteshipRedispatchable(bs) {
 			return nil, apperror.Conflict("kurir Biteship sudah dipanggil untuk pesanan ini")
 		}
 	}
@@ -1296,7 +1296,7 @@ func (s *Service) HandleBiteshipWebhook(ctx context.Context, payload map[string]
 	}
 
 	// Enrich driver info from Biteship GET /v1/orders/{id} when webhook omits it.
-	if s.biteship.Enabled() && driverName == "" && (bStatus == "allocated" || bStatus == "picking_up" || bStatus == "picked" || bStatus == "dropping_off") {
+	if s.biteship.Enabled() && driverName == "" && ShouldFetchBiteshipDriverInfo(bStatus) {
 		if detail, gErr := s.biteship.GetOrder(ctx, biteshipOrderID); gErr == nil && detail != nil {
 			if trackingID == "" {
 				trackingID = strings.TrimSpace(detail.Courier.TrackingID)
