@@ -177,13 +177,24 @@ func (c *BiteshipClient) GetInstantRates(
 		})
 	}
 
-	// Keep deterministic order: GoSend first, then Grab.
+	// Sort by cheapest delivery fee first; break ties deterministically (GoSend first).
 	sort.SliceStable(options, func(i, j int) bool {
+		if options[i].Price != options[j].Price {
+			return options[i].Price < options[j].Price
+		}
 		if options[i].Company == options[j].Company {
 			return false
 		}
 		return options[i].Company == "gojek"
 	})
+	if len(options) > 0 {
+		minPrice := options[0].Price
+		for i := range options {
+			if options[i].Price == minPrice {
+				options[i].IsCheapest = true
+			}
+		}
+	}
 	return options, nil
 }
 

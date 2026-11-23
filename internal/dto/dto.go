@@ -729,6 +729,7 @@ type CourierOption struct {
 	CourierName string `json:"courier_name"`
 	Duration    string `json:"duration"`
 	Price       int    `json:"price"`
+	IsCheapest  bool   `json:"is_cheapest"`
 }
 
 type BranchDeliveryQuote struct {

@@ -37,11 +37,11 @@ func TestBiteshipGetInstantRatesFiltersOnlyGojekAndGrabInstant(t *testing.T) {
 	if len(opts) != 2 {
 		t.Fatalf("got %d options, want 2", len(opts))
 	}
-	if opts[0].Company != "gojek" || opts[0].Price != 17500 || opts[0].CourierName != "GoSend Instant" {
-		t.Fatalf("unexpected first option: %+v", opts[0])
+	if opts[0].Company != "grab" || opts[0].Price != 14000 || opts[0].CourierName != "GrabExpress Instant" || !opts[0].IsCheapest {
+		t.Fatalf("expected cheapest option first (Grab 14000): %+v", opts[0])
 	}
-	if opts[1].Company != "grab" || opts[1].Price != 14000 || opts[1].CourierName != "GrabExpress Instant" {
-		t.Fatalf("unexpected second option: %+v", opts[1])
+	if opts[1].Company != "gojek" || opts[1].Price != 17500 || opts[1].CourierName != "GoSend Instant" || opts[1].IsCheapest {
+		t.Fatalf("expected second option (GoSend 17500): %+v", opts[1])
 	}
 }
 
