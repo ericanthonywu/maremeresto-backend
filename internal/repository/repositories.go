@@ -1218,7 +1218,7 @@ func buildOrderDateClause(dateFrom, dateTo *time.Time, includeActive bool, start
 
 func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offset int) ([]model.Order, int, error) {
 	branchID, status, search := f.BranchID, f.Status, f.Search
-	baseQuery := `FROM orders o JOIN branches b ON o.branch_id = b.id WHERE 1=1`
+	baseQuery := `FROM orders o JOIN branches b ON o.branch_id = b.id LEFT JOIN branch_settings bs ON bs.branch_id = b.id WHERE 1=1`
 	args := []any{}
 	idx := 1
 
