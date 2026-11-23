@@ -50,6 +50,7 @@ type Service struct {
 	snapClient snap.Client
 	geocoder   *geocoder
 	gemini     *GeminiClient
+	biteship   *BiteshipClient
 }
 
 func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *Service {
@@ -59,6 +60,7 @@ func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *S
 		hub:      hub,
 		geocoder: newGeocoder(cfg.GeocoderURL, cfg.GeocoderEmail),
 		gemini:   NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
+		biteship: NewBiteshipClient(cfg.BiteshipAPIKey, cfg.BiteshipBaseURL),
 	}
 
 	env := midtrans.Sandbox
@@ -820,6 +822,49 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 
 	deliveryFee := DeliveryFee(settings, distanceKm, subtotal, req.OrderType)
+	var courierCompanyPtr, courierTypePtr, courierNamePtr *string
+	if isDelivery {
+		cCompany := strings.ToLower(strings.TrimSpace(req.CourierCompany))
+		if cCompany == "" {
+			cCompany = "gojek"
+		}
+		if !IsSupportedInstantCourier(cCompany) {
+			return nil, apperror.Invalid("kurir pengiriman harus GoSend atau Grab")
+		}
+		cType := "instant"
+		cName := CourierDisplayName(cCompany)
+		courierCompanyPtr = &cCompany
+		courierTypePtr = &cType
+		courierNamePtr = &cName
+
+		if s.biteship.Enabled() {
+			rateItems := make([]BiteshipRateItem, 0, len(orderItems))
+			for _, oi := range orderItems {
+				rateItems = append(rateItems, BiteshipRateItem{
+					Name:     oi.ItemName,
+					Value:    oi.ItemPrice,
+					Quantity: oi.Quantity,
+					Weight:   300,
+				})
+			}
+			opts, rateErr := s.biteship.GetInstantRates(ctx, branch.Latitude, branch.Longitude, *req.DeliveryLat, *req.DeliveryLon, rateItems)
+			if rateErr != nil {
+				slog.WarnContext(ctx, "biteship checkout rate error", "branch", branch.Slug, "err", rateErr)
+				return nil, apperror.Invalid("gagal mengambil tarif pengiriman real-time, silakan coba lagi")
+			}
+			matchedPrice := -1
+			for _, opt := range opts {
+				if opt.Company == cCompany {
+					matchedPrice = opt.Price
+					break
+				}
+			}
+			if matchedPrice < 0 {
+				return nil, apperror.Invalid(fmt.Sprintf("layanan %s sedang tidak tersedia untuk alamat ini, silakan pilih kurir lain", cName))
+			}
+			deliveryFee = matchedPrice
+		}
+	}
 
 	// 4. Promo validity, expiry and redemption cap are all enforced here; the
 	//    client-side discount is never trusted.
@@ -891,6 +936,9 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 		Discount:           discount,
 		GrandTotal:         grandTotal,
 		ScheduledAt:        req.ScheduledAt,
+		CourierCompany:     courierCompanyPtr,
+		CourierType:        courierTypePtr,
+		CourierName:        courierNamePtr,
 		Items:              orderItems,
 	}
 	if promoCode != "" {
@@ -1010,6 +1058,268 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 		"order_id", orderID, "order_number", updated.OrderNumber, "from", order.Status, "to", newStatus)
 	s.broadcastStatus(updated, "")
 	return updated, nil
+}
+
+// DispatchCourier books an instant courier (GoSend or Grab) via Biteship for a
+// paid delivery order and moves an accepted order to completed (Sedang diantar).
+func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courierCompany string, expectedVersion int) (*model.Order, error) {
+	if !s.biteship.Enabled() {
+		return nil, apperror.Invalid("integrasi Biteship belum dikonfigurasi pada server")
+	}
+
+	order, err := s.repo.FindOrderByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil {
+		return nil, apperror.ErrNotFound
+	}
+	if order.OrderType == "pickup" {
+		return nil, apperror.Invalid("pesanan ambil di cabang tidak membutuhkan kurir")
+	}
+	if order.Status == "pending" {
+		return nil, apperror.Invalid("pesanan belum dibayar")
+	}
+	if order.Status == "cancelled" || order.Status == "rejected" || order.Status == "refunded" {
+		return nil, apperror.Invalid("pesanan sudah ditutup dan tidak dapat dipanggilkan kurir")
+	}
+	if order.DeliveryLat == nil || order.DeliveryLon == nil || order.DeliveryAddress == nil {
+		return nil, apperror.Invalid("koordinat atau alamat pengantaran tidak lengkap")
+	}
+
+	if order.BiteshipOrderID != nil && *order.BiteshipOrderID != "" {
+		bs := ""
+		if order.BiteshipStatus != nil {
+			bs = strings.ToLower(strings.TrimSpace(*order.BiteshipStatus))
+		}
+		if bs != "cancelled" && bs != "rejected" && bs != "courier_not_found" {
+			return nil, apperror.Conflict("kurir Biteship sudah dipanggil untuk pesanan ini")
+		}
+	}
+
+	company := strings.ToLower(strings.TrimSpace(courierCompany))
+	if company == "" && order.CourierCompany != nil {
+		company = strings.ToLower(strings.TrimSpace(*order.CourierCompany))
+	}
+	if company == "" {
+		company = "gojek"
+	}
+	if !IsSupportedInstantCourier(company) {
+		return nil, apperror.Invalid("kurir pengiriman harus GoSend atau Grab")
+	}
+
+	branch, err := s.repo.FindBranchByID(ctx, order.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	if branch == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	originPhone := sanitizePhoneForBiteship(branch.WhatsappNumber)
+	if originPhone == "" {
+		originPhone = sanitizePhoneForBiteship(branch.Phone)
+	}
+	if originPhone == "" {
+		return nil, apperror.Invalid("nomor kontak outlet belum diatur")
+	}
+	destPhone := sanitizePhoneForBiteship(order.CustomerPhone)
+	if destPhone == "" {
+		destPhone = order.CustomerPhone
+	}
+
+	destNote := ""
+	if order.DeliveryNotes != nil {
+		destNote = *order.DeliveryNotes
+	}
+
+	items := make([]BiteshipRateItem, 0, len(order.Items))
+	for _, it := range order.Items {
+		items = append(items, BiteshipRateItem{
+			Name:     it.ItemName,
+			Value:    it.ItemPrice,
+			Quantity: it.Quantity,
+			Weight:   300,
+		})
+	}
+	if len(items) == 0 {
+		items = []BiteshipRateItem{{
+			Name:     "Pesanan " + order.OrderNumber,
+			Value:    order.Subtotal,
+			Quantity: 1,
+			Weight:   500,
+		}}
+	}
+
+	bReq := &BiteshipCreateOrderRequest{
+		OriginContactName:       branch.Name,
+		OriginContactPhone:      originPhone,
+		OriginAddress:           branch.Address,
+		OriginNote:              order.OrderNumber,
+		OriginCoordinate:        BiteshipCoordinate{Latitude: branch.Latitude, Longitude: branch.Longitude},
+		DestinationContactName:  order.CustomerName,
+		DestinationContactPhone: destPhone,
+		DestinationAddress:      *order.DeliveryAddress,
+		DestinationNote:         destNote,
+		DestinationCoordinate:   BiteshipCoordinate{Latitude: *order.DeliveryLat, Longitude: *order.DeliveryLon},
+		CourierCompany:          company,
+		CourierType:             "instant",
+		DeliveryType:            "now",
+		ReferenceID:             order.OrderNumber,
+		Items:                   items,
+	}
+
+	bResp, err := s.biteship.CreateOrder(ctx, bReq)
+	if err != nil {
+		return nil, apperror.Invalid(fmt.Sprintf("gagal memanggil kurir Biteship: %v", err))
+	}
+
+	versionToUse := expectedVersion
+	if versionToUse <= 0 {
+		versionToUse = order.Version
+	}
+
+	tx, err := s.repo.DB().Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	cName := CourierDisplayName(company)
+	if err := s.repo.SaveOrderCourierDispatch(
+		ctx, tx, order.ID,
+		company, "instant", cName,
+		bResp.ID, bResp.Courier.TrackingID, bResp.Courier.WaybillID, bResp.Courier.Link, bResp.Status,
+		versionToUse,
+	); err != nil {
+		return nil, err
+	}
+
+	if order.Status == "accepted" {
+		if err := s.repo.UpdateOrderStatus(ctx, tx, order.ID, "completed", "", versionToUse+1); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.FindOrderByID(ctx, orderID)
+	if err != nil || updated == nil {
+		return order, nil
+	}
+
+	slog.InfoContext(ctx, "biteship courier dispatched",
+		"order_id", orderID, "order_number", updated.OrderNumber,
+		"courier", company, "biteship_order_id", bResp.ID, "waybill", bResp.Courier.WaybillID)
+	s.broadcastStatus(updated, fmt.Sprintf("Kurir %s berhasil dipanggil.", cName))
+	return updated, nil
+}
+
+// HandleBiteshipWebhook processes status, waybill, and driver updates pushed
+// by Biteship and broadcasts live changes over WebSocket.
+func (s *Service) HandleBiteshipWebhook(ctx context.Context, payload map[string]any) error {
+	if len(payload) == 0 {
+		return nil
+	}
+	biteshipOrderID, _ := payload["order_id"].(string)
+	biteshipOrderID = strings.TrimSpace(biteshipOrderID)
+	if biteshipOrderID == "" {
+		return nil
+	}
+
+	order, err := s.repo.FindOrderByBiteshipOrderID(ctx, biteshipOrderID)
+	if err != nil {
+		return err
+	}
+	if order == nil {
+		slog.InfoContext(ctx, "biteship webhook for unknown order ignored", "biteship_order_id", biteshipOrderID)
+		return nil
+	}
+
+	strField := func(m map[string]any, keys ...string) string {
+		for _, k := range keys {
+			if v, ok := m[k].(string); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		}
+		return ""
+	}
+
+	bStatus := strings.ToLower(strField(payload, "status"))
+	trackingID := strField(payload, "courier_tracking_id")
+	waybillID := strField(payload, "courier_waybill_id")
+	trackingURL := strField(payload, "courier_link")
+	driverName := strField(payload, "courier_driver_name", "driver_name")
+	driverPhone := strField(payload, "courier_driver_phone", "driver_phone")
+	driverPlate := strField(payload, "courier_driver_plate_number", "driver_plate_number")
+	driverPhoto := strField(payload, "courier_driver_photo_url", "driver_photo_url")
+
+	if courierObj, ok := payload["courier"].(map[string]any); ok {
+		if trackingID == "" {
+			trackingID = strField(courierObj, "tracking_id")
+		}
+		if waybillID == "" {
+			waybillID = strField(courierObj, "waybill_id")
+		}
+		if trackingURL == "" {
+			trackingURL = strField(courierObj, "link")
+		}
+		if driverName == "" {
+			driverName = strField(courierObj, "driver_name", "name")
+		}
+		if driverPhone == "" {
+			driverPhone = strField(courierObj, "driver_phone", "phone")
+		}
+		if driverPlate == "" {
+			driverPlate = strField(courierObj, "driver_plate_number")
+		}
+		if driverPhoto == "" {
+			driverPhoto = strField(courierObj, "driver_photo_url")
+		}
+	}
+
+	// Enrich driver info from Biteship GET /v1/orders/{id} when webhook omits it.
+	if s.biteship.Enabled() && driverName == "" && (bStatus == "allocated" || bStatus == "picking_up" || bStatus == "picked" || bStatus == "dropping_off") {
+		if detail, gErr := s.biteship.GetOrder(ctx, biteshipOrderID); gErr == nil && detail != nil {
+			if trackingID == "" {
+				trackingID = strings.TrimSpace(detail.Courier.TrackingID)
+			}
+			if waybillID == "" {
+				waybillID = strings.TrimSpace(detail.Courier.WaybillID)
+			}
+			if trackingURL == "" {
+				trackingURL = strings.TrimSpace(detail.Courier.Link)
+			}
+			if detail.Courier.DriverName != nil && strings.TrimSpace(*detail.Courier.DriverName) != "" {
+				driverName = strings.TrimSpace(*detail.Courier.DriverName)
+			} else if detail.Courier.Name != nil && strings.TrimSpace(*detail.Courier.Name) != "" {
+				driverName = strings.TrimSpace(*detail.Courier.Name)
+			}
+			if detail.Courier.DriverPhone != nil && strings.TrimSpace(*detail.Courier.DriverPhone) != "" {
+				driverPhone = strings.TrimSpace(*detail.Courier.DriverPhone)
+			} else if detail.Courier.Phone != nil && strings.TrimSpace(*detail.Courier.Phone) != "" {
+				driverPhone = strings.TrimSpace(*detail.Courier.Phone)
+			}
+			if detail.Courier.DriverPlateNumber != nil {
+				driverPlate = strings.TrimSpace(*detail.Courier.DriverPlateNumber)
+			}
+			if detail.Courier.DriverPhotoURL != nil {
+				driverPhoto = strings.TrimSpace(*detail.Courier.DriverPhotoURL)
+			}
+		}
+	}
+
+	if err := s.repo.UpdateOrderCourierWebhook(ctx, order.ID, bStatus, trackingID, waybillID, trackingURL, driverName, driverPhone, driverPlate, driverPhoto); err != nil {
+		return err
+	}
+
+	updated, err := s.repo.FindOrderByID(ctx, order.ID)
+	if err == nil && updated != nil {
+		s.broadcastStatus(updated, "")
+	}
+	return nil
 }
 
 func (s *Service) SubmitOrderFeedback(ctx context.Context, orderID uuid.UUID, req *dto.OrderFeedbackRequest) (*model.OrderFeedback, error) {
@@ -1137,6 +1447,45 @@ func (s *Service) broadcastStatus(order *model.Order, message string) {
 	}
 	if order.RejectionReason != nil && *order.RejectionReason != "" {
 		payload["rejection_reason"] = *order.RejectionReason
+	}
+	if order.CourierCompany != nil {
+		payload["courier_company"] = *order.CourierCompany
+	}
+	if order.CourierType != nil {
+		payload["courier_type"] = *order.CourierType
+	}
+	if order.CourierName != nil {
+		payload["courier_name"] = *order.CourierName
+	}
+	if order.BiteshipOrderID != nil {
+		payload["biteship_order_id"] = *order.BiteshipOrderID
+	}
+	if order.BiteshipTrackingID != nil {
+		payload["biteship_tracking_id"] = *order.BiteshipTrackingID
+	}
+	if order.BiteshipWaybillID != nil {
+		payload["biteship_waybill_id"] = *order.BiteshipWaybillID
+	}
+	if order.BiteshipTrackingURL != nil {
+		payload["biteship_tracking_url"] = *order.BiteshipTrackingURL
+	}
+	if order.BiteshipStatus != nil {
+		payload["biteship_status"] = *order.BiteshipStatus
+	}
+	if order.DriverName != nil {
+		payload["driver_name"] = *order.DriverName
+	}
+	if order.DriverPhone != nil {
+		payload["driver_phone"] = *order.DriverPhone
+	}
+	if order.DriverPlate != nil {
+		payload["driver_plate"] = *order.DriverPlate
+	}
+	if order.DriverPhotoURL != nil {
+		payload["driver_photo_url"] = *order.DriverPhotoURL
+	}
+	if order.CourierDispatchedAt != nil {
+		payload["courier_dispatched_at"] = order.CourierDispatchedAt
 	}
 
 	s.hub.Broadcast(ws.OrderRoom(order.ID), "status_updated", payload)

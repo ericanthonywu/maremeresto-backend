@@ -728,9 +728,10 @@ func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Or
 			customer_name, customer_phone, delivery_address, delivery_notes,
 			delivery_lat, delivery_lon, delivery_distance_km,
 			subtotal, delivery_fee, service_fee, discount, grand_total,
-			promo_code, scheduled_at, version
+			promo_code, scheduled_at,
+			courier_company, courier_type, courier_name, version
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 1
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, 1
 		) RETURNING id, version, created_at, updated_at
 	`
 	err := tx.QueryRow(ctx, query,
@@ -739,6 +740,7 @@ func (r *Repository) CreateOrder(ctx context.Context, tx pgx.Tx, order *model.Or
 		order.DeliveryLat, order.DeliveryLon, order.DeliveryDistanceKm,
 		order.Subtotal, order.DeliveryFee, order.ServiceFee, order.Discount, order.GrandTotal,
 		order.PromoCode, order.ScheduledAt,
+		order.CourierCompany, order.CourierType, order.CourierName,
 	).Scan(&order.ID, &order.Version, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
 		return err
@@ -773,8 +775,13 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		       o.customer_name, o.customer_phone, o.delivery_address, o.delivery_notes,
 		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
-		       o.promo_code, o.scheduled_at, o.acknowledged_at,
-		       o.rejection_reason, o.version, o.created_at, o.updated_at,
+		       o.promo_code, o.scheduled_at,
+		       o.courier_company, o.courier_type, o.courier_name,
+		       o.biteship_order_id, o.biteship_tracking_id, o.biteship_waybill_id,
+		       o.biteship_tracking_url, o.biteship_status,
+		       o.driver_name, o.driver_phone, o.driver_plate, o.driver_photo_url,
+		       o.courier_dispatched_at,
+		       o.acknowledged_at, o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug, b.address, b.phone, COALESCE(bs.whatsapp_number, '')
 		FROM orders o
 		JOIN branches b ON o.branch_id = b.id
@@ -788,8 +795,13 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
 		&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 		&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
-		&o.PromoCode, &o.ScheduledAt, &o.AcknowledgedAt,
-		&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+		&o.PromoCode, &o.ScheduledAt,
+		&o.CourierCompany, &o.CourierType, &o.CourierName,
+		&o.BiteshipOrderID, &o.BiteshipTrackingID, &o.BiteshipWaybillID,
+		&o.BiteshipTrackingURL, &o.BiteshipStatus,
+		&o.DriverName, &o.DriverPhone, &o.DriverPlate, &o.DriverPhotoURL,
+		&o.CourierDispatchedAt,
+		&o.AcknowledgedAt, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 		&bName, &bSlug, &bAddr, &bPhone, &bWhatsApp,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1247,8 +1259,13 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		       o.customer_name, o.customer_phone, o.delivery_address, o.delivery_notes,
 		       o.delivery_lat, o.delivery_lon, o.delivery_distance_km,
 		       o.subtotal, o.delivery_fee, o.service_fee, o.discount, o.grand_total,
-		       o.promo_code, o.scheduled_at, o.acknowledged_at,
-		       o.rejection_reason, o.version, o.created_at, o.updated_at,
+		       o.promo_code, o.scheduled_at,
+		       o.courier_company, o.courier_type, o.courier_name,
+		       o.biteship_order_id, o.biteship_tracking_id, o.biteship_waybill_id,
+		       o.biteship_tracking_url, o.biteship_status,
+		       o.driver_name, o.driver_phone, o.driver_plate, o.driver_photo_url,
+		       o.courier_dispatched_at,
+		       o.acknowledged_at, o.rejection_reason, o.version, o.created_at, o.updated_at,
 		       b.name, b.slug
 		` + baseQuery + fmt.Sprintf(
 		" ORDER BY COALESCE(CASE WHEN o.order_type = 'scheduled' THEN o.scheduled_at END, o.created_at) DESC, o.created_at DESC LIMIT $%d OFFSET $%d",
@@ -1271,8 +1288,13 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 			&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
 			&o.DeliveryLat, &o.DeliveryLon, &o.DeliveryDistanceKm,
 			&o.Subtotal, &o.DeliveryFee, &o.ServiceFee, &o.Discount, &o.GrandTotal,
-			&o.PromoCode, &o.ScheduledAt, &o.AcknowledgedAt,
-			&o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+			&o.PromoCode, &o.ScheduledAt,
+			&o.CourierCompany, &o.CourierType, &o.CourierName,
+			&o.BiteshipOrderID, &o.BiteshipTrackingID, &o.BiteshipWaybillID,
+			&o.BiteshipTrackingURL, &o.BiteshipStatus,
+			&o.DriverName, &o.DriverPhone, &o.DriverPlate, &o.DriverPhotoURL,
+			&o.CourierDispatchedAt,
+			&o.AcknowledgedAt, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
 			&bName, &bSlug,
 		); err != nil {
 			return nil, 0, err
@@ -1400,6 +1422,76 @@ func (r *Repository) UpdateOrderStatus(ctx context.Context, tx pgx.Tx, orderID u
 	// Insert history
 	_, err = tx.Exec(ctx, `INSERT INTO order_status_history (order_id, to_status, notes) VALUES ($1, $2, $3)`,
 		orderID, newStatus, rejectionReason)
+	return err
+}
+
+func (r *Repository) FindOrderByBiteshipOrderID(ctx context.Context, biteshipOrderID string) (*model.Order, error) {
+	var id uuid.UUID
+	err := r.db.QueryRow(ctx, `SELECT id FROM orders WHERE biteship_order_id = $1`, biteshipOrderID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.FindOrderByID(ctx, id)
+}
+
+func (r *Repository) SaveOrderCourierDispatch(
+	ctx context.Context,
+	tx pgx.Tx,
+	orderID uuid.UUID,
+	company, ctype, cname, biteshipOrderID, trackingID, waybillID, trackingURL, bStatus string,
+	expectedVersion int,
+) error {
+	query := `
+		UPDATE orders
+		SET courier_company = $1,
+		    courier_type = $2,
+		    courier_name = $3,
+		    biteship_order_id = $4,
+		    biteship_tracking_id = NULLIF($5, ''),
+		    biteship_waybill_id = NULLIF($6, ''),
+		    biteship_tracking_url = NULLIF($7, ''),
+		    biteship_status = NULLIF($8, ''),
+		    driver_name = NULL,
+		    driver_phone = NULL,
+		    driver_plate = NULL,
+		    driver_photo_url = NULL,
+		    courier_dispatched_at = NOW(),
+		    version = version + 1,
+		    updated_at = NOW()
+		WHERE id = $9 AND version = $10
+	`
+	res, err := tx.Exec(ctx, query, company, ctype, cname, biteshipOrderID, trackingID, waybillID, trackingURL, bStatus, orderID, expectedVersion)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return apperror.ErrConcurrentModification
+	}
+	return nil
+}
+
+func (r *Repository) UpdateOrderCourierWebhook(
+	ctx context.Context,
+	orderID uuid.UUID,
+	bStatus, trackingID, waybillID, trackingURL, driverName, driverPhone, driverPlate, driverPhoto string,
+) error {
+	query := `
+		UPDATE orders
+		SET biteship_status = COALESCE(NULLIF($1, ''), biteship_status),
+		    biteship_tracking_id = COALESCE(NULLIF($2, ''), biteship_tracking_id),
+		    biteship_waybill_id = COALESCE(NULLIF($3, ''), biteship_waybill_id),
+		    biteship_tracking_url = COALESCE(NULLIF($4, ''), biteship_tracking_url),
+		    driver_name = COALESCE(NULLIF($5, ''), driver_name),
+		    driver_phone = COALESCE(NULLIF($6, ''), driver_phone),
+		    driver_plate = COALESCE(NULLIF($7, ''), driver_plate),
+		    driver_photo_url = COALESCE(NULLIF($8, ''), driver_photo_url),
+		    updated_at = NOW()
+		WHERE id = $9
+	`
+	_, err := r.db.Exec(ctx, query, bStatus, trackingID, waybillID, trackingURL, driverName, driverPhone, driverPlate, driverPhoto, orderID)
 	return err
 }
 

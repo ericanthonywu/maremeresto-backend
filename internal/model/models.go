@@ -118,8 +118,21 @@ type Order struct {
 	ServiceFee         int            `json:"service_fee"`
 	Discount           int            `json:"discount"`
 	GrandTotal         int            `json:"grand_total"`
-	PromoCode          *string        `json:"promo_code,omitempty"`
-	ScheduledAt        *time.Time     `json:"scheduled_at,omitempty"`
+	PromoCode           *string        `json:"promo_code,omitempty"`
+	ScheduledAt         *time.Time     `json:"scheduled_at,omitempty"`
+	CourierCompany      *string        `json:"courier_company,omitempty"`
+	CourierType         *string        `json:"courier_type,omitempty"`
+	CourierName         *string        `json:"courier_name,omitempty"`
+	BiteshipOrderID     *string        `json:"biteship_order_id,omitempty"`
+	BiteshipTrackingID  *string        `json:"biteship_tracking_id,omitempty"`
+	BiteshipWaybillID   *string        `json:"biteship_waybill_id,omitempty"`
+	BiteshipTrackingURL *string        `json:"biteship_tracking_url,omitempty"`
+	BiteshipStatus      *string        `json:"biteship_status,omitempty"`
+	DriverName          *string        `json:"driver_name,omitempty"`
+	DriverPhone         *string        `json:"driver_phone,omitempty"`
+	DriverPlate         *string        `json:"driver_plate,omitempty"`
+	DriverPhotoURL      *string        `json:"driver_photo_url,omitempty"`
+	CourierDispatchedAt *time.Time     `json:"courier_dispatched_at,omitempty"`
 	AcknowledgedAt     *time.Time     `json:"acknowledged_at,omitempty"`
 	RejectionReason    *string        `json:"rejection_reason,omitempty"`
 	Version            int            `json:"version"`

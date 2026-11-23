@@ -128,6 +128,7 @@ func registerRESTRoutes(
 		admin.Get("/api/v1/admin/orders", ctrl.ListOrders)
 		admin.Get("/api/v1/admin/orders/{id}", ctrl.GetOrder)
 		admin.Put("/api/v1/admin/orders/{id}/status", ctrl.UpdateOrderStatus)
+		admin.Post("/api/v1/admin/orders/{id}/dispatch-courier", ctrl.DispatchCourier)
 		admin.Post("/api/v1/admin/orders/{id}/refund", ctrl.RefundOrder)
 		admin.Post("/api/v1/admin/orders/acknowledge", ctrl.AcknowledgeOrders)
 

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
@@ -154,10 +156,10 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 
 	now := time.Now()
 	withinSolo := IsWithinSoloArea(req.Lat, req.Lon)
-	quotes := make([]dto.BranchDeliveryQuote, 0, len(branches))
-	nearestIdx := -1
+	quotes := make([]dto.BranchDeliveryQuote, len(branches))
+	serviceableFlags := make([]bool, len(branches))
 
-	for _, b := range branches {
+	for i, b := range branches {
 		set, err := s.settingsFor(ctx, b.ID)
 		if err != nil {
 			return nil, err
@@ -167,9 +169,10 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 
 		maxRadius := effectiveMaxRadiusKm(set)
 		serviceable := withinSolo && distance <= maxRadius
+		serviceableFlags[i] = serviceable
 		openNow := b.IsOpen && IsWithinOperatingHours(set.OperatingHours, now)
 
-		q := dto.BranchDeliveryQuote{
+		quotes[i] = dto.BranchDeliveryQuote{
 			BranchID:         b.ID,
 			BranchSlug:       b.Slug,
 			BranchName:       b.Name,
@@ -185,7 +188,52 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			FreeDeliveryFrom: 0,
 			IsOpenNow:        openNow,
 		}
-		quotes = append(quotes, q)
+	}
+
+	// Fetch real-time GoSend & Grab instant rates concurrently for serviceable branches.
+	if orderType != "pickup" && s.biteship.Enabled() && withinSolo {
+		rateCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
+		itemValue := req.Subtotal
+		if itemValue < 10000 {
+			itemValue = 25000
+		}
+		rateItems := []BiteshipRateItem{{
+			Name:     "Pesanan Makanan & Minuman",
+			Value:    itemValue,
+			Quantity: 1,
+			Weight:   500,
+		}}
+
+		var wg sync.WaitGroup
+		for i, b := range branches {
+			if !serviceableFlags[i] {
+				continue
+			}
+			wg.Add(1)
+			go func(idx int, br model.Branch) {
+				defer wg.Done()
+				opts, err := s.biteship.GetInstantRates(rateCtx, br.Latitude, br.Longitude, req.Lat, req.Lon, rateItems)
+				if err != nil {
+					slog.WarnContext(rateCtx, "biteship quote failed", "branch", br.Slug, "err", err)
+					quotes[idx].CourierOptions = []dto.CourierOption{}
+					quotes[idx].DeliveryFee = 0
+					return
+				}
+				quotes[idx].CourierOptions = opts
+				if len(opts) > 0 {
+					quotes[idx].DeliveryFee = opts[0].Price
+				} else {
+					quotes[idx].DeliveryFee = 0
+				}
+			}(i, b)
+		}
+		wg.Wait()
+	}
+
+	nearestIdx := -1
+	for i := range quotes {
+		q := quotes[i]
 
 		// Nearest = closest branch within radius that can actually take the order right now;
 		// fall back to closest within radius even if closed.
@@ -193,14 +241,14 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			continue
 		}
 		if nearestIdx == -1 {
-			nearestIdx = len(quotes) - 1
+			nearestIdx = i
 			continue
 		}
 		best := quotes[nearestIdx]
 		bestUsable := best.WithinRadius && best.IsOpenNow
 		thisUsable := q.WithinRadius && q.IsOpenNow
 		if (thisUsable && !bestUsable) || (thisUsable == bestUsable && q.DistanceKm < best.DistanceKm) {
-			nearestIdx = len(quotes) - 1
+			nearestIdx = i
 		}
 	}
 

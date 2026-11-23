@@ -106,6 +106,8 @@ type CreateOrderRequest struct {
 	DeliveryLon     *float64                 `json:"delivery_lon"`
 	PromoCode       string                   `json:"promo_code"`
 	ScheduledAt     *time.Time               `json:"scheduled_at"`
+	CourierCompany  string                   `json:"courier_company"`
+	CourierType     string                   `json:"courier_type"`
 	Items           []CreateOrderItemRequest `json:"items" validate:"required,min=1"`
 }
 
@@ -116,6 +118,15 @@ func (r *CreateOrderRequest) Validate() error {
 	r.DeliveryAddress = strings.TrimSpace(r.DeliveryAddress)
 	r.DeliveryNotes = strings.TrimSpace(r.DeliveryNotes)
 	r.PromoCode = strings.ToUpper(strings.TrimSpace(r.PromoCode))
+	r.CourierCompany = strings.ToLower(strings.TrimSpace(r.CourierCompany))
+	r.CourierType = strings.ToLower(strings.TrimSpace(r.CourierType))
+
+	if r.CourierCompany != "" && r.CourierCompany != "gojek" && r.CourierCompany != "grab" {
+		return apperror.Invalid("kurir pengiriman harus GoSend atau Grab")
+	}
+	if r.CourierType != "" && r.CourierType != "instant" {
+		return apperror.Invalid("tipe pengiriman harus instant")
+	}
 
 	if r.BranchID == uuid.Nil {
 		return apperror.Invalid("outlet wajib dipilih")
@@ -195,6 +206,11 @@ func (r *CreateOrderRequest) Validate() error {
 type UpdateOrderStatusRequest struct {
 	Status          string `json:"status" validate:"required"`
 	RejectionReason string `json:"rejection_reason"`
+	ExpectedVersion int    `json:"expected_version"`
+}
+
+type DispatchCourierRequest struct {
+	CourierCompany  string `json:"courier_company"`
 	ExpectedVersion int    `json:"expected_version"`
 }
 
@@ -707,14 +723,23 @@ type DeliveryQuoteRequest struct {
 	OrderType string  `json:"order_type"`
 }
 
+type CourierOption struct {
+	Company     string `json:"courier_company"`
+	Type        string `json:"courier_type"`
+	CourierName string `json:"courier_name"`
+	Duration    string `json:"duration"`
+	Price       int    `json:"price"`
+}
+
 type BranchDeliveryQuote struct {
-	BranchID         uuid.UUID `json:"branch_id"`
-	BranchSlug       string    `json:"branch_slug"`
-	BranchName       string    `json:"branch_name"`
-	DistanceKm       float64   `json:"distance_km"`
-	DistanceMeters   int       `json:"distance_meters"`
-	DeliveryFee      int       `json:"delivery_fee"`
-	ServiceFee       int       `json:"service_fee"`
+	BranchID         uuid.UUID       `json:"branch_id"`
+	BranchSlug       string          `json:"branch_slug"`
+	BranchName       string          `json:"branch_name"`
+	DistanceKm       float64         `json:"distance_km"`
+	DistanceMeters   int             `json:"distance_meters"`
+	DeliveryFee      int             `json:"delivery_fee"`
+	CourierOptions   []CourierOption `json:"courier_options,omitempty"`
+	ServiceFee       int             `json:"service_fee"`
 	MinOrderAmount   int       `json:"min_order_amount"`
 	EtaMinutes       int       `json:"eta_minutes"`
 	MaxRadiusKm      int       `json:"max_radius_km"`

@@ -34,6 +34,8 @@ type Config struct {
 	AlertToEmail      string `mapstructure:"ALERT_TO_EMAIL"`
 	GeminiAPIKey      string `mapstructure:"GEMINI_API_KEY"`
 	GeminiModel       string `mapstructure:"GEMINI_MODEL"`
+	BiteshipAPIKey    string `mapstructure:"BITESHIP_API_KEY"`
+	BiteshipBaseURL   string `mapstructure:"BITESHIP_BASE_URL"`
 }
 
 func (c *Config) IsProduction() bool {
@@ -59,6 +61,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("SMTP_PORT", "587")
 	viper.SetDefault("GEMINI_API_KEY", "")
 	viper.SetDefault("GEMINI_MODEL", "gemini-2.5-flash")
+	viper.SetDefault("BITESHIP_API_KEY", "")
+	viper.SetDefault("BITESHIP_BASE_URL", "https://api.biteship.com")
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -76,6 +80,8 @@ func Load() (*Config, error) {
 		"GEOCODER_URL", "GEOCODER_EMAIL",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
 		"ALERT_FROM_EMAIL", "ALERT_TO_EMAIL",
+		"GEMINI_API_KEY", "GEMINI_MODEL",
+		"BITESHIP_API_KEY", "BITESHIP_BASE_URL",
 	} {
 		if err := viper.BindEnv(key); err != nil {
 			return nil, err

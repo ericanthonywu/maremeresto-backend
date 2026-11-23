@@ -807,6 +807,40 @@ func (c *Controller) UpdateOrderStatus(w http.ResponseWriter, r *http.Request) {
 	ok(w, order)
 }
 
+func (c *Controller) DispatchCourier(w http.ResponseWriter, r *http.Request) {
+	id, err := urlUUID(r, "id")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	var req dto.DispatchCourierRequest
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
+		if decErr := json.NewDecoder(r.Body).Decode(&req); decErr != nil && !errors.Is(decErr, io.EOF) {
+			writeError(w, r, apperror.Invalid("format data tidak valid"))
+			return
+		}
+	}
+
+	existing, err := c.svc.GetOrder(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !c.svc.CanAccessOrder(actor(r), existing) {
+		writeError(w, r, apperror.ErrForbidden)
+		return
+	}
+
+	order, err := c.svc.DispatchCourier(r.Context(), id, req.CourierCompany, req.ExpectedVersion)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	ok(w, order)
+}
+
 // RefundOrder issues a Midtrans refund (full or partial) against a paid
 // order and moves it to the terminal "refunded" status.
 func (c *Controller) RefundOrder(w http.ResponseWriter, r *http.Request) {
@@ -1045,6 +1079,14 @@ func (c *Controller) HandleBiteshipWebhook(w http.ResponseWriter, r *http.Reques
 		"status", payload["status"],
 		"courier_waybill_id", payload["courier_waybill_id"],
 	)
+
+	if r.Method == http.MethodPost && c.svc != nil && len(payload) > 0 {
+		if err := c.svc.HandleBiteshipWebhook(r.Context(), payload); err != nil {
+			slog.ErrorContext(r.Context(), "failed to process Biteship webhook", "err", err)
+			http.Error(w, "processing error", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "status": "ok"})
 }
