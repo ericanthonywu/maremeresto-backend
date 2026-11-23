@@ -58,3 +58,61 @@ func TestSanitizePhoneForBiteship(t *testing.T) {
 		}
 	}
 }
+
+func TestBiteshipCreateOrderSendsExactOriginAndDestination(t *testing.T) {
+	var captured BiteshipCreateOrderRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/orders" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"id":      "bs_order_1",
+			"status":  "confirmed",
+			"courier": map[string]any{
+				"tracking_id": "trk_1",
+				"waybill_id":  "wyb_1",
+				"link":        "https://track.biteship.com/trk_1",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewBiteshipClient("biteship_test_key", srv.URL)
+	resp, err := client.CreateOrder(context.Background(), &BiteshipCreateOrderRequest{
+		OriginContactName:       "Mareme Kerten",
+		OriginContactPhone:      "085867222301",
+		OriginAddress:           "Jl. Samratulangi No.65, Kerten, Kec. Laweyan, Kota Surakarta, Jawa Tengah 57143",
+		OriginNote:              "Outlet Mareme Kerten | KERTEN-20261123-0001",
+		OriginCoordinate:        BiteshipCoordinate{Latitude: -7.5597, Longitude: 110.7942},
+		DestinationContactName:  "Budi",
+		DestinationContactPhone: "081234567890",
+		DestinationAddress:      "Jl. Slamet Riyadi No. 100, Surakarta",
+		DestinationNote:         "Pagar hitam",
+		DestinationCoordinate:   BiteshipCoordinate{Latitude: -7.567, Longitude: 110.812},
+		CourierCompany:          "gojek",
+		CourierType:             "instant",
+		DeliveryType:            "now",
+		ReferenceID:             "KERTEN-20261123-0001",
+		Items:                   []BiteshipRateItem{{Name: "Nasi Goreng", Value: 25000, Quantity: 1, Weight: 300}},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder failed: %v", err)
+	}
+	if resp.ID != "bs_order_1" {
+		t.Fatalf("unexpected order id: %q", resp.ID)
+	}
+	if captured.OriginAddress != "Jl. Samratulangi No.65, Kerten, Kec. Laweyan, Kota Surakarta, Jawa Tengah 57143" {
+		t.Fatalf("unexpected origin address: %q", captured.OriginAddress)
+	}
+	if captured.OriginCoordinate.Latitude != -7.5597 || captured.OriginCoordinate.Longitude != 110.7942 {
+		t.Fatalf("unexpected origin coordinate: %+v", captured.OriginCoordinate)
+	}
+	if captured.DestinationCoordinate.Latitude != -7.567 || captured.DestinationCoordinate.Longitude != 110.812 {
+		t.Fatalf("unexpected destination coordinate: %+v", captured.DestinationCoordinate)
+	}
+}

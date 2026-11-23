@@ -210,8 +210,9 @@ type UpdateOrderStatusRequest struct {
 }
 
 type DispatchCourierRequest struct {
-	CourierCompany  string `json:"courier_company"`
-	ExpectedVersion int    `json:"expected_version"`
+	CourierCompany   string     `json:"courier_company"`
+	ExpectedBranchID *uuid.UUID `json:"expected_branch_id"`
+	ExpectedVersion  int        `json:"expected_version"`
 }
 
 type OrderItemFeedbackDTO struct {
@@ -736,6 +737,7 @@ type BranchDeliveryQuote struct {
 	BranchID         uuid.UUID       `json:"branch_id"`
 	BranchSlug       string          `json:"branch_slug"`
 	BranchName       string          `json:"branch_name"`
+	BranchAddress    string          `json:"branch_address"`
 	DistanceKm       float64         `json:"distance_km"`
 	DistanceMeters   int             `json:"distance_meters"`
 	DeliveryFee      int             `json:"delivery_fee"`

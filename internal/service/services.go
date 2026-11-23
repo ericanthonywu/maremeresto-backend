@@ -1062,7 +1062,7 @@ func (s *Service) UpdateOrderStatus(ctx context.Context, orderID uuid.UUID, newS
 
 // DispatchCourier books an instant courier (GoSend or Grab) via Biteship for a
 // paid delivery order and moves an accepted order to completed (Sedang diantar).
-func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courierCompany string, expectedVersion int) (*model.Order, error) {
+func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courierCompany string, expectedBranchID *uuid.UUID, expectedVersion int) (*model.Order, error) {
 	if !s.biteship.Enabled() {
 		return nil, apperror.Invalid("integrasi Biteship belum dikonfigurasi pada server")
 	}
@@ -1074,6 +1074,9 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 	if order == nil {
 		return nil, apperror.ErrNotFound
 	}
+	if expectedBranchID != nil && *expectedBranchID != uuid.Nil && *expectedBranchID != order.BranchID {
+		return nil, apperror.Conflict("cabang pesanan tidak sesuai dengan cabang yang dipilih — batal memanggil kurir untuk mencegah salah alamat pickup")
+	}
 	if order.OrderType == "pickup" {
 		return nil, apperror.Invalid("pesanan ambil di cabang tidak membutuhkan kurir")
 	}
@@ -1083,7 +1086,8 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 	if order.Status == "cancelled" || order.Status == "rejected" || order.Status == "refunded" {
 		return nil, apperror.Invalid("pesanan sudah ditutup dan tidak dapat dipanggilkan kurir")
 	}
-	if order.DeliveryLat == nil || order.DeliveryLon == nil || order.DeliveryAddress == nil {
+	if order.DeliveryLat == nil || order.DeliveryLon == nil || order.DeliveryAddress == nil ||
+		strings.TrimSpace(*order.DeliveryAddress) == "" || (*order.DeliveryLat == 0 && *order.DeliveryLon == 0) {
 		return nil, apperror.Invalid("koordinat atau alamat pengantaran tidak lengkap")
 	}
 
@@ -1114,6 +1118,14 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 	}
 	if branch == nil {
 		return nil, apperror.ErrNotFound
+	}
+	originAddr := strings.TrimSpace(branch.Address)
+	if originAddr == "" || (branch.Latitude == 0 && branch.Longitude == 0) || !IsWithinSoloArea(branch.Latitude, branch.Longitude) {
+		return nil, apperror.Invalid("alamat atau koordinat cabang pickup belum valid")
+	}
+	destAddr := strings.TrimSpace(*order.DeliveryAddress)
+	if !IsWithinSoloArea(*order.DeliveryLat, *order.DeliveryLon) {
+		return nil, apperror.Invalid("koordinat tujuan berada di luar area layanan Solo Raya")
 	}
 
 	originPhone := sanitizePhoneForBiteship(branch.WhatsappNumber)
@@ -1154,12 +1166,12 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 	bReq := &BiteshipCreateOrderRequest{
 		OriginContactName:       branch.Name,
 		OriginContactPhone:      originPhone,
-		OriginAddress:           branch.Address,
-		OriginNote:              order.OrderNumber,
+		OriginAddress:           originAddr,
+		OriginNote:              fmt.Sprintf("Outlet %s | %s", branch.Name, order.OrderNumber),
 		OriginCoordinate:        BiteshipCoordinate{Latitude: branch.Latitude, Longitude: branch.Longitude},
 		DestinationContactName:  order.CustomerName,
 		DestinationContactPhone: destPhone,
-		DestinationAddress:      *order.DeliveryAddress,
+		DestinationAddress:      destAddr,
 		DestinationNote:         destNote,
 		DestinationCoordinate:   BiteshipCoordinate{Latitude: *order.DeliveryLat, Longitude: *order.DeliveryLon},
 		CourierCompany:          company,
@@ -1212,6 +1224,9 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 
 	slog.InfoContext(ctx, "biteship courier dispatched",
 		"order_id", orderID, "order_number", updated.OrderNumber,
+		"branch_id", branch.ID, "branch_slug", branch.Slug, "branch_name", branch.Name,
+		"origin_address", originAddr, "origin_lat", branch.Latitude, "origin_lon", branch.Longitude,
+		"dest_address", destAddr, "dest_lat", *order.DeliveryLat, "dest_lon", *order.DeliveryLon,
 		"courier", company, "biteship_order_id", bResp.ID, "waybill", bResp.Courier.WaybillID)
 	s.broadcastStatus(updated, fmt.Sprintf("Kurir %s berhasil dipanggil.", cName))
 	return updated, nil

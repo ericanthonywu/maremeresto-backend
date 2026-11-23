@@ -176,6 +176,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			BranchID:         b.ID,
 			BranchSlug:       b.Slug,
 			BranchName:       b.Name,
+			BranchAddress:    b.Address,
 			DistanceKm:       distance,
 			DistanceMeters:   int(math.Round(distance * 1000)),
 			DeliveryFee:      fee,

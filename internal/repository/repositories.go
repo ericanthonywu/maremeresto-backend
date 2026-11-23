@@ -414,12 +414,17 @@ func (r *Repository) FindBranchBySlug(ctx context.Context, slug string) (*model.
 }
 
 func (r *Repository) FindBranchByID(ctx context.Context, id uuid.UUID) (*model.Branch, error) {
-	query := `SELECT id, slug, name, address, phone, latitude, longitude, gradient_theme, icon, facility_tags, rating, is_open, created_at, updated_at FROM branches WHERE id = $1`
+	query := `
+		SELECT b.id, b.slug, b.name, b.address, b.phone, b.latitude, b.longitude, b.gradient_theme, b.icon, b.facility_tags, b.rating, b.is_open, b.created_at, b.updated_at, COALESCE(bs.whatsapp_number, '')
+		FROM branches b
+		LEFT JOIN branch_settings bs ON bs.branch_id = b.id
+		WHERE b.id = $1
+	`
 	var b model.Branch
 	var tagsJSON []byte
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&b.ID, &b.Slug, &b.Name, &b.Address, &b.Phone, &b.Latitude, &b.Longitude,
-		&b.GradientTheme, &b.Icon, &tagsJSON, &b.Rating, &b.IsOpen, &b.CreatedAt, &b.UpdatedAt,
+		&b.GradientTheme, &b.Icon, &tagsJSON, &b.Rating, &b.IsOpen, &b.CreatedAt, &b.UpdatedAt, &b.WhatsappNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -782,7 +787,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		       o.driver_name, o.driver_phone, o.driver_plate, o.driver_photo_url,
 		       o.courier_dispatched_at,
 		       o.acknowledged_at, o.rejection_reason, o.version, o.created_at, o.updated_at,
-		       b.name, b.slug, b.address, b.phone, COALESCE(bs.whatsapp_number, '')
+		       b.name, b.slug, b.address, b.phone, b.latitude, b.longitude, COALESCE(bs.whatsapp_number, '')
 		FROM orders o
 		JOIN branches b ON o.branch_id = b.id
 		LEFT JOIN branch_settings bs ON bs.branch_id = b.id
@@ -790,6 +795,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 	`
 	var o model.Order
 	var bName, bSlug, bAddr, bPhone, bWhatsApp string
+	var bLat, bLon float64
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&o.ID, &o.OrderNumber, &o.UserID, &o.BranchID, &o.OrderType, &o.Status,
 		&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
@@ -802,7 +808,7 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		&o.DriverName, &o.DriverPhone, &o.DriverPlate, &o.DriverPhotoURL,
 		&o.CourierDispatchedAt,
 		&o.AcknowledgedAt, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
-		&bName, &bSlug, &bAddr, &bPhone, &bWhatsApp,
+		&bName, &bSlug, &bAddr, &bPhone, &bLat, &bLon, &bWhatsApp,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -816,6 +822,8 @@ func (r *Repository) FindOrderByID(ctx context.Context, id uuid.UUID) (*model.Or
 		Slug:           bSlug,
 		Address:        bAddr,
 		Phone:          bPhone,
+		Latitude:       bLat,
+		Longitude:      bLon,
 		WhatsappNumber: bWhatsApp,
 	}
 
@@ -1266,7 +1274,7 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 		       o.driver_name, o.driver_phone, o.driver_plate, o.driver_photo_url,
 		       o.courier_dispatched_at,
 		       o.acknowledged_at, o.rejection_reason, o.version, o.created_at, o.updated_at,
-		       b.name, b.slug
+		       b.name, b.slug, b.address, b.phone, b.latitude, b.longitude, COALESCE(bs.whatsapp_number, '')
 		` + baseQuery + fmt.Sprintf(
 		" ORDER BY COALESCE(CASE WHEN o.order_type = 'scheduled' THEN o.scheduled_at END, o.created_at) DESC, o.created_at DESC LIMIT $%d OFFSET $%d",
 		idx, idx+1,
@@ -1282,7 +1290,8 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 	orders := make([]model.Order, 0)
 	for rows.Next() {
 		var o model.Order
-		var bName, bSlug string
+		var bName, bSlug, bAddr, bPhone, bWhatsApp string
+		var bLat, bLon float64
 		if err := rows.Scan(
 			&o.ID, &o.OrderNumber, &o.UserID, &o.BranchID, &o.OrderType, &o.Status,
 			&o.CustomerName, &o.CustomerPhone, &o.DeliveryAddress, &o.DeliveryNotes,
@@ -1295,14 +1304,19 @@ func (r *Repository) listOrders(ctx context.Context, f orderFilter, limit, offse
 			&o.DriverName, &o.DriverPhone, &o.DriverPlate, &o.DriverPhotoURL,
 			&o.CourierDispatchedAt,
 			&o.AcknowledgedAt, &o.RejectionReason, &o.Version, &o.CreatedAt, &o.UpdatedAt,
-			&bName, &bSlug,
+			&bName, &bSlug, &bAddr, &bPhone, &bLat, &bLon, &bWhatsApp,
 		); err != nil {
 			return nil, 0, err
 		}
 		o.Branch = &model.Branch{
-			ID:   o.BranchID,
-			Name: bName,
-			Slug: bSlug,
+			ID:             o.BranchID,
+			Name:           bName,
+			Slug:           bSlug,
+			Address:        bAddr,
+			Phone:          bPhone,
+			Latitude:       bLat,
+			Longitude:      bLon,
+			WhatsappNumber: bWhatsApp,
 		}
 		orders = append(orders, o)
 	}

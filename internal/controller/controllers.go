@@ -833,7 +833,7 @@ func (c *Controller) DispatchCourier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := c.svc.DispatchCourier(r.Context(), id, req.CourierCompany, req.ExpectedVersion)
+	order, err := c.svc.DispatchCourier(r.Context(), id, req.CourierCompany, req.ExpectedBranchID, req.ExpectedVersion)
 	if err != nil {
 		writeError(w, r, err)
 		return
