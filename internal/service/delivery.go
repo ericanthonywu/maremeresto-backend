@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,7 +208,12 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 			Weight:   500,
 		}}
 
-		var wg sync.WaitGroup
+		var (
+			wg                sync.WaitGroup
+			errMu             sync.Mutex
+			biteshipErrors    []string
+			affectedBranchIDs []uuid.UUID
+		)
 		for i, b := range branches {
 			if !serviceableFlags[i] {
 				continue
@@ -219,6 +226,12 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 					slog.WarnContext(rateCtx, "biteship quote failed", "branch", br.Slug, "err", err)
 					quotes[idx].CourierOptions = []dto.CourierOption{}
 					quotes[idx].DeliveryFee = 0
+					quotes[idx].CourierUnavailable = true
+					quotes[idx].CourierError = "Layanan cek ongkir (Biteship) sedang gangguan. Anda tetap bisa memesan — ongkir tetap ditanggung customer dan dibayarkan langsung ke kurir (COD)."
+					errMu.Lock()
+					biteshipErrors = append(biteshipErrors, fmt.Sprintf("%s (%s): %v", br.Name, br.Slug, err))
+					affectedBranchIDs = append(affectedBranchIDs, br.ID)
+					errMu.Unlock()
 					return
 				}
 				quotes[idx].CourierOptions = opts
@@ -226,10 +239,21 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 					quotes[idx].DeliveryFee = opts[0].Price
 				} else {
 					quotes[idx].DeliveryFee = 0
+					quotes[idx].CourierUnavailable = true
+					quotes[idx].CourierError = "Tarif kurir instan belum tersedia otomatis. Anda tetap bisa memesan — ongkir tetap ditanggung customer dan dibayarkan langsung ke kurir (COD)."
 				}
 			}(i, b)
 		}
 		wg.Wait()
+
+		if len(biteshipErrors) > 0 {
+			s.notifyBiteshipOutage(
+				"biteship:quote_failed",
+				"⚠️ Gangguan Ongkir Biteship",
+				fmt.Sprintf("Biteship tidak dapat memproses tarif ongkir untuk koordinat (%.5f, %.5f):\n• %s\n\nPelanggan tetap dapat memesan dengan catatan ongkir ditanggung customer dan dibayarkan langsung (COD).", req.Lat, req.Lon, strings.Join(biteshipErrors, "\n• ")),
+				affectedBranchIDs,
+			)
+		}
 	}
 
 	nearestIdx := -1

@@ -60,7 +60,7 @@ func main() {
 	repo := repository.NewRepository(dbPool)
 	repo.EnsureFeedbackSchema(context.Background())
 	repo.EnsureStaffCredentialsSchema(context.Background())
-	svc := service.NewService(repo, cfg, hub)
+	svc := service.NewService(repo, cfg, hub, alertSvc)
 	ctrl := controller.NewController(svc, hub, cfg)
 	r := router.NewRouter(cfg, ctrl, alertSvc)
 

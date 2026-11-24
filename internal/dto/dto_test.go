@@ -409,4 +409,24 @@ func TestUpdateBranchCredentialsValidation(t *testing.T) {
 	}
 }
 
+func TestCreateOrderRequestCourierType(t *testing.T) {
+	codOrder := validOrder()
+	codOrder.CourierType = "cod"
+	if err := codOrder.Validate(); err != nil {
+		t.Fatalf("expected courier_type=cod to be valid, got %v", err)
+	}
+
+	instantOrder := validOrder()
+	instantOrder.CourierType = "instant"
+	instantOrder.CourierCompany = "grab"
+	if err := instantOrder.Validate(); err != nil {
+		t.Fatalf("expected courier_type=instant to be valid, got %v", err)
+	}
+
+	invalidOrder := validOrder()
+	invalidOrder.CourierType = "drone"
+	if err := invalidOrder.Validate(); err == nil {
+		t.Error("expected invalid courier_type to be rejected")
+	}
+}
 

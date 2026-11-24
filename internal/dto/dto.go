@@ -124,8 +124,8 @@ func (r *CreateOrderRequest) Validate() error {
 	if r.CourierCompany != "" && r.CourierCompany != "gojek" && r.CourierCompany != "grab" {
 		return apperror.Invalid("kurir pengiriman harus GoSend atau Grab")
 	}
-	if r.CourierType != "" && r.CourierType != "instant" {
-		return apperror.Invalid("tipe pengiriman harus instant")
+	if r.CourierType != "" && r.CourierType != "instant" && r.CourierType != "cod" {
+		return apperror.Invalid("tipe pengiriman harus instant atau cod")
 	}
 
 	if r.BranchID == uuid.Nil {
@@ -740,9 +740,11 @@ type BranchDeliveryQuote struct {
 	BranchAddress    string          `json:"branch_address"`
 	DistanceKm       float64         `json:"distance_km"`
 	DistanceMeters   int             `json:"distance_meters"`
-	DeliveryFee      int             `json:"delivery_fee"`
-	CourierOptions   []CourierOption `json:"courier_options,omitempty"`
-	ServiceFee       int             `json:"service_fee"`
+	DeliveryFee        int             `json:"delivery_fee"`
+	CourierOptions     []CourierOption `json:"courier_options,omitempty"`
+	CourierUnavailable bool            `json:"courier_unavailable"`
+	CourierError       string          `json:"courier_error,omitempty"`
+	ServiceFee         int             `json:"service_fee"`
 	MinOrderAmount   int       `json:"min_order_amount"`
 	EtaMinutes       int       `json:"eta_minutes"`
 	MaxRadiusKm      int       `json:"max_radius_km"`

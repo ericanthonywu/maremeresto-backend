@@ -24,9 +24,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/disintegration/imaging"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
@@ -44,23 +46,28 @@ import (
 )
 
 type Service struct {
-	repo       *repository.Repository
-	cfg        *config.Config
-	hub        *ws.Hub
-	snapClient snap.Client
-	geocoder   *geocoder
-	gemini     *GeminiClient
-	biteship   *BiteshipClient
+	repo        *repository.Repository
+	cfg         *config.Config
+	hub         *ws.Hub
+	alertSvc    *alert.AlertService
+	snapClient  snap.Client
+	geocoder    *geocoder
+	gemini      *GeminiClient
+	biteship    *BiteshipClient
+	alertMu     sync.Mutex
+	lastAlertAt map[string]time.Time
 }
 
-func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *Service {
+func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub, alertSvc *alert.AlertService) *Service {
 	s := &Service{
-		repo:     repo,
-		cfg:      cfg,
-		hub:      hub,
-		geocoder: newGeocoder(cfg.GeocoderURL, cfg.GeocoderEmail),
-		gemini:   NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
-		biteship: NewBiteshipClient(cfg.BiteshipAPIKey, cfg.BiteshipBaseURL),
+		repo:        repo,
+		cfg:         cfg,
+		hub:         hub,
+		alertSvc:    alertSvc,
+		geocoder:    newGeocoder(cfg.GeocoderURL, cfg.GeocoderEmail),
+		gemini:      NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
+		biteship:    NewBiteshipClient(cfg.BiteshipAPIKey, cfg.BiteshipBaseURL),
+		lastAlertAt: make(map[string]time.Time),
 	}
 
 	env := midtrans.Sandbox
@@ -823,47 +830,73 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 
 	deliveryFee := DeliveryFee(settings, distanceKm, subtotal, req.OrderType)
 	var courierCompanyPtr, courierTypePtr, courierNamePtr *string
+	isCourierCOD := false
 	if isDelivery {
+		requestedCOD := strings.EqualFold(strings.TrimSpace(req.CourierType), "cod")
 		cCompany := strings.ToLower(strings.TrimSpace(req.CourierCompany))
 		if cCompany == "" {
 			cCompany = "gojek"
 		}
-		if !IsSupportedInstantCourier(cCompany) {
+		if !requestedCOD && !IsSupportedInstantCourier(cCompany) {
 			return nil, apperror.Invalid("kurir pengiriman harus GoSend atau Grab")
 		}
-		cType := "instant"
-		cName := CourierDisplayName(cCompany)
-		courierCompanyPtr = &cCompany
-		courierTypePtr = &cType
-		courierNamePtr = &cName
 
-		if s.biteship.Enabled() {
-			rateItems := make([]BiteshipRateItem, 0, len(orderItems))
-			for _, oi := range orderItems {
-				rateItems = append(rateItems, BiteshipRateItem{
-					Name:     oi.ItemName,
-					Value:    oi.ItemPrice,
-					Quantity: oi.Quantity,
-					Weight:   300,
-				})
-			}
-			opts, rateErr := s.biteship.GetInstantRates(ctx, branch.Latitude, branch.Longitude, *req.DeliveryLat, *req.DeliveryLon, rateItems)
-			if rateErr != nil {
-				slog.WarnContext(ctx, "biteship checkout rate error", "branch", branch.Slug, "err", rateErr)
-				return nil, apperror.Invalid("gagal mengambil tarif pengiriman real-time, silakan coba lagi")
-			}
-			matchedPrice := -1
-			for _, opt := range opts {
-				if opt.Company == cCompany {
-					matchedPrice = opt.Price
-					break
+		if requestedCOD {
+			isCourierCOD = true
+		} else {
+			cType := "instant"
+			cName := CourierDisplayName(cCompany)
+			courierCompanyPtr = &cCompany
+			courierTypePtr = &cType
+			courierNamePtr = &cName
+
+			if s.biteship.Enabled() {
+				rateItems := make([]BiteshipRateItem, 0, len(orderItems))
+				for _, oi := range orderItems {
+					rateItems = append(rateItems, BiteshipRateItem{
+						Name:     oi.ItemName,
+						Value:    oi.ItemPrice,
+						Quantity: oi.Quantity,
+						Weight:   300,
+					})
+				}
+				opts, rateErr := s.biteship.GetInstantRates(ctx, branch.Latitude, branch.Longitude, *req.DeliveryLat, *req.DeliveryLon, rateItems)
+				if rateErr != nil {
+					slog.WarnContext(ctx, "biteship checkout rate error; falling back to COD shipping", "branch", branch.Slug, "err", rateErr)
+					s.notifyBiteshipOutage(
+						"biteship:checkout_rate_failed",
+						"⚠️ Gangguan Ongkir Biteship (Checkout)",
+						fmt.Sprintf("Biteship gagal memproses ongkir saat customer checkout di %s (%s): %v\n\nPesanan tetap dilanjutkan dengan ongkir ditanggung customer dan dibayarkan langsung (COD).", branch.Name, branch.Slug, rateErr),
+						[]uuid.UUID{branch.ID},
+					)
+					isCourierCOD = true
+				} else if len(opts) == 0 {
+					slog.WarnContext(ctx, "biteship checkout returned no instant couriers; falling back to COD shipping", "branch", branch.Slug)
+					isCourierCOD = true
+				} else {
+					matchedPrice := -1
+					for _, opt := range opts {
+						if opt.Company == cCompany {
+							matchedPrice = opt.Price
+							break
+						}
+					}
+					if matchedPrice < 0 {
+						return nil, apperror.Invalid(fmt.Sprintf("layanan %s sedang tidak tersedia untuk alamat ini, silakan pilih kurir lain", cName))
+					}
+					deliveryFee = matchedPrice
 				}
 			}
-			if matchedPrice < 0 {
-				return nil, apperror.Invalid(fmt.Sprintf("layanan %s sedang tidak tersedia untuk alamat ini, silakan pilih kurir lain", cName))
-			}
-			deliveryFee = matchedPrice
 		}
+	}
+
+	if isCourierCOD {
+		deliveryFee = 0
+		courierCompanyPtr = nil
+		codType := "cod"
+		codName := "Ongkir COD (Ditanggung Customer)"
+		courierTypePtr = &codType
+		courierNamePtr = &codName
 	}
 
 	// 4. Promo validity, expiry and redemption cap are all enforced here; the
@@ -908,6 +941,14 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 
 	deliveryAddress := strings.TrimSpace(req.DeliveryAddress)
 	deliveryNotes := strings.TrimSpace(req.DeliveryNotes)
+	if isCourierCOD {
+		const codNote = "[Catatan Ongkir: Ongkir tetap ditanggung customer dan dibayarkan langsung ke kurir (COD)]"
+		if deliveryNotes == "" {
+			deliveryNotes = codNote
+		} else {
+			deliveryNotes = deliveryNotes + "\n" + codNote
+		}
+	}
 
 	var addrPtr *string
 	var latPtr, lonPtr *float64
@@ -1183,6 +1224,12 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 
 	bResp, err := s.biteship.CreateOrder(ctx, bReq)
 	if err != nil {
+		s.notifyBiteshipOutage(
+			"biteship:dispatch_failed",
+			"⚠️ Gangguan Pemanggilan Kurir Biteship",
+			fmt.Sprintf("Gagal memanggil kurir Biteship untuk pesanan %s (%s): %v", order.OrderNumber, branch.Name, err),
+			[]uuid.UUID{branch.ID},
+		)
 		return nil, apperror.Invalid(fmt.Sprintf("gagal memanggil kurir Biteship: %v", err))
 	}
 
@@ -1446,6 +1493,56 @@ func isValidTransition(from, to string) bool {
 		}
 	}
 	return false
+}
+
+const biteshipAlertCooldown = 5 * time.Minute
+
+// notifyBiteshipOutage sends a deduplicated operational alert to configured
+// WhatsApp/email channels and broadcasts a live system_alert to admin/owner sockets.
+func (s *Service) notifyBiteshipOutage(key, title, details string, branchIDs []uuid.UUID) {
+	if s.alertSvc != nil {
+		s.alertSvc.SendOperationalAlert(key, title, details, biteshipAlertCooldown)
+	}
+
+	if s.hub == nil {
+		return
+	}
+	s.alertMu.Lock()
+	if s.lastAlertAt == nil {
+		s.lastAlertAt = make(map[string]time.Time)
+	}
+	now := time.Now()
+	shouldBroadcast := true
+	if prev, ok := s.lastAlertAt[key]; ok && now.Sub(prev) < biteshipAlertCooldown {
+		shouldBroadcast = false
+	} else {
+		s.lastAlertAt[key] = now
+	}
+	s.alertMu.Unlock()
+
+	if !shouldBroadcast {
+		return
+	}
+
+	payload := map[string]any{
+		"key":       key,
+		"severity":  "error",
+		"title":     title,
+		"message":   details,
+		"timestamp": now.Format(time.RFC3339),
+	}
+	s.hub.Broadcast(ws.RoomOwner, "system_alert", payload)
+	seen := make(map[uuid.UUID]struct{}, len(branchIDs))
+	for _, bid := range branchIDs {
+		if bid == uuid.Nil {
+			continue
+		}
+		if _, dup := seen[bid]; dup {
+			continue
+		}
+		seen[bid] = struct{}{}
+		s.hub.Broadcast(ws.RoomBranchPfx+bid.String(), "system_alert", payload)
+	}
 }
 
 // broadcastStatus notifies the one customer tracking this order plus the staff
