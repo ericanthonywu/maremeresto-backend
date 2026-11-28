@@ -15,7 +15,6 @@ import (
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
-	"github.com/ericanthonywu/maremereso-olga/backend/internal/logging"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/middleware"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/service"
 	ws "github.com/ericanthonywu/maremereso-olga/backend/internal/websocket"
@@ -1317,9 +1316,6 @@ func (c *Controller) PostClientLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if req.TraceID != "" {
-		ctx = logging.WithTraceID(ctx, req.TraceID)
-	}
 
 	ua := req.UserAgent
 	if ua == "" {
@@ -1340,6 +1336,12 @@ func (c *Controller) PostClientLog(w http.ResponseWriter, r *http.Request) {
 		"category", req.Category,
 		"msg_detail", req.Message,
 		"ip", ip,
+	}
+	// Server-assigned trace_id on ctx remains authoritative for this request;
+	// any trace_id reported by the client (read from an earlier server response)
+	// is recorded separately as ref_trace_id for correlation.
+	if req.TraceID != "" {
+		attrs = append(attrs, "ref_trace_id", req.TraceID)
 	}
 	if req.Route != "" {
 		attrs = append(attrs, "route", req.Route)

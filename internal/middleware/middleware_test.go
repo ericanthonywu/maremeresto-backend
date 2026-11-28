@@ -15,21 +15,37 @@ func TestLoggerTraceIDPropagation(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	req.Header.Set("X-Trace-Id", "fe-trace-001")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	// Client-supplied X-Trace-Id must be ignored so callers cannot spoof trace IDs.
+	reqSpoof := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	reqSpoof.Header.Set("X-Trace-Id", "fe-spoof-001")
+	recSpoof := httptest.NewRecorder()
+	handler.ServeHTTP(recSpoof, reqSpoof)
 
-	if got := rec.Header().Get("X-Trace-Id"); got != "fe-trace-001" {
-		t.Fatalf("expected response X-Trace-Id=fe-trace-001, got %q", got)
+	gotSpoof := recSpoof.Header().Get("X-Trace-Id")
+	if gotSpoof == "" || gotSpoof == "fe-spoof-001" {
+		t.Fatalf("expected server-generated trace ID ignoring client X-Trace-Id, got %q", gotSpoof)
 	}
-	if ctxTraceID != "fe-trace-001" {
-		t.Fatalf("expected context trace ID fe-trace-001, got %q", ctxTraceID)
+	if ctxTraceID != gotSpoof {
+		t.Fatalf("expected context trace ID %q, got %q", gotSpoof, ctxTraceID)
 	}
 
-	// Forged header with whitespace/newlines must be rejected and replaced.
+	// Reverse-proxy injected X-Request-Id (e.g. Nginx $request_id) is preserved.
+	reqProxy := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	reqProxy.Header.Set("X-Request-Id", "nginx-req-001")
+	reqProxy.Header.Set("X-Trace-Id", "fe-spoof-002")
+	recProxy := httptest.NewRecorder()
+	handler.ServeHTTP(recProxy, reqProxy)
+
+	if got := recProxy.Header().Get("X-Trace-Id"); got != "nginx-req-001" {
+		t.Fatalf("expected response X-Trace-Id=nginx-req-001, got %q", got)
+	}
+	if ctxTraceID != "nginx-req-001" {
+		t.Fatalf("expected context trace ID nginx-req-001, got %q", ctxTraceID)
+	}
+
+	// Forged X-Request-Id with whitespace/newlines must be rejected and replaced.
 	reqBad := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	reqBad.Header.Set("X-Trace-Id", "bad trace\nline")
+	reqBad.Header.Set("X-Request-Id", "bad trace\nline")
 	recBad := httptest.NewRecorder()
 	handler.ServeHTTP(recBad, reqBad)
 

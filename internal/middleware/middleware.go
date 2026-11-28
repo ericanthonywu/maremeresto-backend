@@ -338,9 +338,8 @@ func sanitizeClientApp(raw string) string {
 }
 
 func traceID(r *http.Request) string {
-	if reqID := sanitizeTraceID(r.Header.Get("X-Trace-Id")); reqID != "" {
-		return reqID
-	}
+	// Never trust client-supplied X-Trace-Id; only accept X-Request-Id injected
+	// by our reverse proxy (Nginx $request_id), otherwise mint a server ID.
 	if reqID := sanitizeTraceID(r.Header.Get("X-Request-Id")); reqID != "" {
 		return reqID
 	}
