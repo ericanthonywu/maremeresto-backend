@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
+	"github.com/ericanthonywu/maremereso-olga/backend/internal/logging"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/middleware"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/service"
 	ws "github.com/ericanthonywu/maremereso-olga/backend/internal/websocket"
@@ -50,12 +52,16 @@ func ok(w http.ResponseWriter, data any) {
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	appErr := apperror.FromError(err)
+	attrs := []any{"status", appErr.Code, "method", r.Method, "path", r.URL.Path, "err", err}
+	if claims := actor(r); claims != nil {
+		attrs = append(attrs, "user_id", claims.UserID, "role", claims.Role)
+	}
 	// 5xx hides the real cause from the client, so the log is the only place
 	// it can be found. 4xx are expected outcomes and stay at debug.
 	if appErr.Code >= 500 {
-		slog.ErrorContext(r.Context(), "request failed", "status", appErr.Code, "method", r.Method, "path", r.URL.Path, "err", err)
+		slog.ErrorContext(r.Context(), "request failed", attrs...)
 	} else {
-		slog.DebugContext(r.Context(), "request rejected", "status", appErr.Code, "method", r.Method, "path", r.URL.Path, "err", err)
+		slog.DebugContext(r.Context(), "request rejected", attrs...)
 	}
 	writeJSON(w, appErr.Code, map[string]any{"success": false, "error": appErr.Error()})
 }
@@ -1035,9 +1041,16 @@ func (c *Controller) HandleMidtransNotification(w http.ResponseWriter, r *http.R
 	var notification map[string]any
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	if err := json.NewDecoder(r.Body).Decode(&notification); err != nil {
+		slog.WarnContext(r.Context(), "midtrans notification invalid json", "err", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+
+	slog.InfoContext(r.Context(), "Midtrans webhook received",
+		"order_id", notification["order_id"],
+		"transaction_status", notification["transaction_status"],
+		"payment_type", notification["payment_type"],
+	)
 
 	if err := c.svc.HandleMidtransWebhook(r.Context(), notification); err != nil {
 		// Midtrans retries on a non-2xx. A bad signature is never going to
@@ -1047,6 +1060,7 @@ func (c *Controller) HandleMidtransNotification(w http.ResponseWriter, r *http.R
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 			return
 		}
+		slog.ErrorContext(r.Context(), "failed to process Midtrans webhook", "order_id", notification["order_id"], "err", err)
 		http.Error(w, "processing error", http.StatusInternalServerError)
 		return
 	}
@@ -1067,6 +1081,7 @@ func (c *Controller) HandleBiteshipWebhook(w http.ResponseWriter, r *http.Reques
 	if r.Method == http.MethodPost {
 		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			slog.WarnContext(r.Context(), "biteship webhook invalid json", "err", err)
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
@@ -1264,6 +1279,7 @@ func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if token != "" {
 		claims, err := middleware.ParseToken(c.cfg, token)
 		if err != nil {
+			slog.WarnContext(r.Context(), "websocket rejected: invalid token", "err", err)
 			writeError(w, r, apperror.ErrUnauthorized)
 			return
 		}
@@ -1283,6 +1299,73 @@ func (c *Controller) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 // Health is the liveness probe for nginx and the process manager.
 func (c *Controller) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// PostClientLog ingests structured frontend runtime/API/boundary errors into
+// the backend structured log stream so FE and BE issues share one correlated
+// log pipeline.
+func (c *Controller) PostClientLog(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var req dto.ClientLogRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, r, apperror.Invalid("format log tidak valid"))
+		return
+	}
+	if err := req.Validate(); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+	if req.TraceID != "" {
+		ctx = logging.WithTraceID(ctx, req.TraceID)
+	}
+
+	ua := req.UserAgent
+	if ua == "" {
+		ua = strings.TrimSpace(r.UserAgent())
+		if len(ua) > 300 {
+			ua = ua[:300] + "..."
+		}
+	}
+
+	ip := r.RemoteAddr
+	if host, _, splitErr := net.SplitHostPort(r.RemoteAddr); splitErr == nil {
+		ip = host
+	}
+
+	attrs := []any{
+		"source", "frontend",
+		"app", req.App,
+		"category", req.Category,
+		"msg_detail", req.Message,
+		"ip", ip,
+	}
+	if req.Route != "" {
+		attrs = append(attrs, "route", req.Route)
+	}
+	if req.Endpoint != "" {
+		attrs = append(attrs, "endpoint", req.Endpoint)
+	}
+	if req.HTTPStatus > 0 {
+		attrs = append(attrs, "http_status", req.HTTPStatus)
+	}
+	if req.Release != "" {
+		attrs = append(attrs, "release", req.Release)
+	}
+	if ua != "" {
+		attrs = append(attrs, "user_agent", ua)
+	}
+	if req.Stack != "" {
+		attrs = append(attrs, "stack", req.Stack)
+	}
+
+	level := slog.LevelError
+	if req.Level == "warn" {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, "Frontend Event", attrs...)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------------------------------------------------------------------

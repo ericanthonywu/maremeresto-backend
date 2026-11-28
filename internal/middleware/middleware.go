@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/logging"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -163,8 +161,8 @@ func CORS(cfg *config.Config) func(http.Handler) http.Handler {
 	return cors.New(cors.Options{
 		AllowedOrigins:   cleaned,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "Idempotency-Key"},
-		ExposedHeaders:   []string{"Idempotency-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "Idempotency-Key", "X-Trace-Id", "X-Request-Id", "X-Client-App"},
+		ExposedHeaders:   []string{"Idempotency-Key", "X-Trace-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}).Handler
@@ -265,6 +263,7 @@ func Idempotency(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("Idempotency-Key")
 		if key == "" {
+			slog.WarnContext(r.Context(), "missing Idempotency-Key header", "method", r.Method, "path", r.URL.Path)
 			writeAuthError(w, http.StatusBadRequest, "Idempotency-Key header wajib untuk operasi pembayaran")
 			return
 		}
@@ -314,14 +313,38 @@ func (s *statusRecorder) Flush() {
 // http.ResponseController.
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
+func sanitizeTraceID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 64 {
+		return ""
+	}
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		valid := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '/' || c == ':'
+		if !valid {
+			return ""
+		}
+	}
+	return raw
+}
+
+func sanitizeClientApp(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "customer", "admin":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
 func traceID(r *http.Request) string {
-	if reqID := chimw.GetReqID(r.Context()); reqID != "" {
+	if reqID := sanitizeTraceID(r.Header.Get("X-Trace-Id")); reqID != "" {
 		return reqID
 	}
-	if reqID := r.Header.Get("X-Request-Id"); reqID != "" {
+	if reqID := sanitizeTraceID(r.Header.Get("X-Request-Id")); reqID != "" {
 		return reqID
 	}
-	if reqID := r.Header.Get("X-Trace-Id"); reqID != "" {
+	if reqID := sanitizeTraceID(chimw.GetReqID(r.Context())); reqID != "" {
 		return reqID
 	}
 	return uuid.NewString()
@@ -355,31 +378,27 @@ func Logger(next http.Handler) http.Handler {
 			"duration", time.Since(start),
 			"ip", clientIP(r),
 		}
+		if clientApp := sanitizeClientApp(r.Header.Get("X-Client-App")); clientApp != "" {
+			attrs = append(attrs, "client_app", clientApp)
+		}
+		if rec.status >= 500 {
+			if ua := strings.TrimSpace(r.UserAgent()); ua != "" {
+				attrs = append(attrs, "user_agent", ua)
+			}
+		}
 		slog.Log(r.Context(), level, "HTTP Request", attrs...)
 	})
 }
 
-func Recovery(alertSvc *alert.AlertService) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					tid := logging.TraceID(r.Context())
-					if tid == "" {
-						tid = traceID(r)
-					}
-					stack := string(debug.Stack())
-					errMsg := fmt.Sprintf("%v", rec)
-					slog.ErrorContext(r.Context(), "PANIC recovered", "err", rec, "path", r.URL.Path, "stack", stack)
-
-					if alertSvc != nil {
-						alertSvc.SendErrorAlert(tid, errMsg, r.URL.Path, stack)
-					}
-
-					writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
-				}
-			}()
-			next.ServeHTTP(w, r)
-		})
-	}
+func Recovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				stack := string(debug.Stack())
+				slog.ErrorContext(r.Context(), "PANIC recovered", "err", rec, "method", r.Method, "path", r.URL.Path, "stack", stack)
+				writeAuthError(w, http.StatusInternalServerError, "terjadi kesalahan pada server")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }

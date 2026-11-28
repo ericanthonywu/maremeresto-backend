@@ -879,3 +879,70 @@ func (r *UpdateBranchCredentialsRequest) Validate() error {
 	return nil
 }
 
+type ClientLogRequest struct {
+	App        string `json:"app"`
+	Level      string `json:"level"`
+	Category   string `json:"category"`
+	Message    string `json:"message"`
+	Stack      string `json:"stack,omitempty"`
+	Route      string `json:"route,omitempty"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	TraceID    string `json:"trace_id,omitempty"`
+	Release    string `json:"release,omitempty"`
+	UserAgent  string `json:"user_agent,omitempty"`
+}
+
+func truncateString(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+func sanitizeLogTraceID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 64 {
+		return ""
+	}
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		valid := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '/' || c == ':'
+		if !valid {
+			return ""
+		}
+	}
+	return raw
+}
+
+func (r *ClientLogRequest) Validate() error {
+	r.App = strings.ToLower(strings.TrimSpace(r.App))
+	if r.App != "customer" && r.App != "admin" {
+		return apperror.Invalid("app harus customer atau admin")
+	}
+	r.Level = strings.ToLower(strings.TrimSpace(r.Level))
+	if r.Level == "" {
+		r.Level = "error"
+	}
+	if r.Level != "error" && r.Level != "warn" {
+		return apperror.Invalid("level log tidak valid")
+	}
+	r.Category = truncateString(r.Category, 64)
+	if r.Category == "" {
+		r.Category = "runtime"
+	}
+	r.Message = truncateString(r.Message, 1000)
+	if r.Message == "" {
+		return apperror.Invalid("message log wajib diisi")
+	}
+	r.Stack = truncateString(r.Stack, 4000)
+	r.Route = truncateString(r.Route, 500)
+	r.Endpoint = truncateString(r.Endpoint, 250)
+	r.TraceID = sanitizeLogTraceID(r.TraceID)
+	r.Release = truncateString(r.Release, 64)
+	r.UserAgent = truncateString(r.UserAgent, 300)
+	return nil
+}
+

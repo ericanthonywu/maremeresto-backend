@@ -223,7 +223,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 				defer wg.Done()
 				opts, err := s.biteship.GetInstantRates(rateCtx, br.Latitude, br.Longitude, req.Lat, req.Lon, rateItems)
 				if err != nil {
-					slog.WarnContext(rateCtx, "biteship quote failed", "branch", br.Slug, "err", err)
+					slog.ErrorContext(rateCtx, "biteship quote failed", "branch", br.Slug, "err", err)
 					quotes[idx].CourierOptions = []dto.CourierOption{}
 					quotes[idx].DeliveryFee = 0
 					quotes[idx].CourierUnavailable = true
@@ -248,6 +248,7 @@ func (s *Service) QuoteDelivery(ctx context.Context, req *dto.DeliveryQuoteReque
 
 		if len(biteshipErrors) > 0 {
 			s.notifyBiteshipOutage(
+				ctx,
 				"biteship:quote_failed",
 				"⚠️ Gangguan Ongkir Biteship",
 				fmt.Sprintf("Biteship tidak dapat memproses tarif ongkir untuk koordinat (%.5f, %.5f):\n• %s\n\nPelanggan tetap dapat memesan dengan catatan ongkir ditanggung customer dan dibayarkan langsung (COD).", req.Lat, req.Lon, strings.Join(biteshipErrors, "\n• ")),

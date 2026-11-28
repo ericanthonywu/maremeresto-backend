@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
-	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/apperror"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/dto"
@@ -49,7 +48,6 @@ type Service struct {
 	repo        *repository.Repository
 	cfg         *config.Config
 	hub         *ws.Hub
-	alertSvc    *alert.AlertService
 	snapClient  snap.Client
 	geocoder    *geocoder
 	gemini      *GeminiClient
@@ -58,12 +56,11 @@ type Service struct {
 	lastAlertAt map[string]time.Time
 }
 
-func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub, alertSvc *alert.AlertService) *Service {
+func NewService(repo *repository.Repository, cfg *config.Config, hub *ws.Hub) *Service {
 	s := &Service{
 		repo:        repo,
 		cfg:         cfg,
 		hub:         hub,
-		alertSvc:    alertSvc,
 		geocoder:    newGeocoder(cfg.GeocoderURL, cfg.GeocoderEmail),
 		gemini:      NewGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
 		biteship:    NewBiteshipClient(cfg.BiteshipAPIKey, cfg.BiteshipBaseURL),
@@ -862,8 +859,9 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 				}
 				opts, rateErr := s.biteship.GetInstantRates(ctx, branch.Latitude, branch.Longitude, *req.DeliveryLat, *req.DeliveryLon, rateItems)
 				if rateErr != nil {
-					slog.WarnContext(ctx, "biteship checkout rate error; falling back to COD shipping", "branch", branch.Slug, "err", rateErr)
+					slog.ErrorContext(ctx, "biteship checkout rate error; falling back to COD shipping", "branch", branch.Slug, "err", rateErr)
 					s.notifyBiteshipOutage(
+						ctx,
 						"biteship:checkout_rate_failed",
 						"⚠️ Gangguan Ongkir Biteship (Checkout)",
 						fmt.Sprintf("Biteship gagal memproses ongkir saat customer checkout di %s (%s): %v\n\nPesanan tetap dilanjutkan dengan ongkir ditanggung customer dan dibayarkan langsung (COD).", branch.Name, branch.Slug, rateErr),
@@ -1000,6 +998,14 @@ func (s *Service) CreateOrder(ctx context.Context, userID *uuid.UUID, req *dto.C
 	}
 
 	order.Branch = branch
+	slog.InfoContext(ctx, "order created",
+		"order_id", order.ID,
+		"order_number", order.OrderNumber,
+		"branch_slug", branch.Slug,
+		"order_type", order.OrderType,
+		"grand_total", order.GrandTotal,
+		"courier_type", order.CourierType,
+	)
 
 	// Do not notify admin rooms yet — the order enters the admin system with
 	// notifications only after the customer completes payment.
@@ -1224,7 +1230,11 @@ func (s *Service) DispatchCourier(ctx context.Context, orderID uuid.UUID, courie
 
 	bResp, err := s.biteship.CreateOrder(ctx, bReq)
 	if err != nil {
+		slog.ErrorContext(ctx, "biteship courier dispatch failed",
+			"order_id", orderID, "order_number", order.OrderNumber,
+			"branch", branch.Slug, "courier", company, "err", err)
 		s.notifyBiteshipOutage(
+			ctx,
 			"biteship:dispatch_failed",
 			"⚠️ Gangguan Pemanggilan Kurir Biteship",
 			fmt.Sprintf("Gagal memanggil kurir Biteship untuk pesanan %s (%s): %v", order.OrderNumber, branch.Name, err),
@@ -1344,7 +1354,10 @@ func (s *Service) HandleBiteshipWebhook(ctx context.Context, payload map[string]
 
 	// Enrich driver info from Biteship GET /v1/orders/{id} when webhook omits it.
 	if s.biteship.Enabled() && driverName == "" && ShouldFetchBiteshipDriverInfo(bStatus) {
-		if detail, gErr := s.biteship.GetOrder(ctx, biteshipOrderID); gErr == nil && detail != nil {
+		detail, gErr := s.biteship.GetOrder(ctx, biteshipOrderID)
+		if gErr != nil {
+			slog.WarnContext(ctx, "biteship get order enrichment failed", "order_id", order.ID, "biteship_order_id", biteshipOrderID, "err", gErr)
+		} else if detail != nil {
 			if trackingID == "" {
 				trackingID = strings.TrimSpace(detail.Courier.TrackingID)
 			}
@@ -1376,6 +1389,13 @@ func (s *Service) HandleBiteshipWebhook(ctx context.Context, payload map[string]
 	if err := s.repo.UpdateOrderCourierWebhook(ctx, order.ID, bStatus, trackingID, waybillID, trackingURL, driverName, driverPhone, driverPlate, driverPhoto); err != nil {
 		return err
 	}
+
+	slog.InfoContext(ctx, "biteship webhook processed",
+		"order_id", order.ID,
+		"order_number", order.OrderNumber,
+		"biteship_order_id", biteshipOrderID,
+		"biteship_status", bStatus,
+	)
 
 	updated, err := s.repo.FindOrderByID(ctx, order.ID)
 	if err == nil && updated != nil {
@@ -1497,13 +1517,9 @@ func isValidTransition(from, to string) bool {
 
 const biteshipAlertCooldown = 5 * time.Minute
 
-// notifyBiteshipOutage sends a deduplicated operational alert to configured
-// WhatsApp/email channels and broadcasts a live system_alert to admin/owner sockets.
-func (s *Service) notifyBiteshipOutage(key, title, details string, branchIDs []uuid.UUID) {
-	if s.alertSvc != nil {
-		s.alertSvc.SendOperationalAlert(key, title, details, biteshipAlertCooldown)
-	}
-
+// notifyBiteshipOutage broadcasts a deduplicated live system_alert to admin/owner
+// sockets when Biteship fails (external notifications are handled by log monitoring).
+func (s *Service) notifyBiteshipOutage(ctx context.Context, key, title, details string, branchIDs []uuid.UUID) {
 	if s.hub == nil {
 		return
 	}
@@ -1521,6 +1537,7 @@ func (s *Service) notifyBiteshipOutage(key, title, details string, branchIDs []u
 	s.alertMu.Unlock()
 
 	if !shouldBroadcast {
+		slog.DebugContext(ctx, "biteship system_alert ws broadcast suppressed by cooldown", "key", key)
 		return
 	}
 
@@ -1845,6 +1862,13 @@ func (s *Service) CreatePayment(ctx context.Context, req *dto.CreatePaymentReque
 		return nil, err
 	}
 
+	slog.InfoContext(ctx, "payment session created",
+		"order_id", order.ID,
+		"order_number", order.OrderNumber,
+		"midtrans_order_id", midtransOrderID,
+		"amount", order.GrandTotal,
+		"replaced", existingP != nil,
+	)
 	return payment, nil
 }
 
@@ -2114,6 +2138,15 @@ func (s *Service) reconcileMidtransPayload(ctx context.Context, payload map[stri
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
+
+	slog.InfoContext(ctx, "midtrans payment reconciled",
+		"order_id", order.ID,
+		"order_number", order.OrderNumber,
+		"midtrans_order_id", orderID,
+		"payment_status", newPaymentStatus,
+		"tx_status", txStatus,
+		"order_advanced", advanced,
+	)
 
 	if advanced {
 		freshOrder, fErr := s.repo.FindOrderByID(ctx, order.ID)

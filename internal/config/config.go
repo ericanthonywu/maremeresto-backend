@@ -26,15 +26,7 @@ type Config struct {
 	AdminURL          string `mapstructure:"ADMIN_URL"`
 	GeocoderURL       string `mapstructure:"GEOCODER_URL"`
 	GeocoderEmail     string `mapstructure:"GEOCODER_EMAIL"`
-	SMTPHost          string `mapstructure:"SMTP_HOST"`
-	SMTPPort          string `mapstructure:"SMTP_PORT"`
-	SMTPUser          string `mapstructure:"SMTP_USER"`
-	SMTPPassword      string `mapstructure:"SMTP_PASSWORD"`
-	AlertFromEmail      string `mapstructure:"ALERT_FROM_EMAIL"`
-	AlertToEmail        string `mapstructure:"ALERT_TO_EMAIL"`
-	AlertWhatsAppURL    string `mapstructure:"ALERT_WHATSAPP_URL"`
-	AlertWhatsAppChatID string `mapstructure:"ALERT_WHATSAPP_CHAT_ID"`
-	GeminiAPIKey        string `mapstructure:"GEMINI_API_KEY"`
+	GeminiAPIKey      string `mapstructure:"GEMINI_API_KEY"`
 	GeminiModel       string `mapstructure:"GEMINI_MODEL"`
 	BiteshipAPIKey    string `mapstructure:"BITESHIP_API_KEY"`
 	BiteshipBaseURL   string `mapstructure:"BITESHIP_BASE_URL"`
@@ -60,11 +52,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("GEOCODER_URL", "https://nominatim.openstreetmap.org")
 	viper.SetDefault("GEOCODER_EMAIL", "")
 	viper.SetDefault("MIDTRANS_IS_PROD", false)
-	viper.SetDefault("SMTP_PORT", "587")
 	viper.SetDefault("GEMINI_API_KEY", "")
 	viper.SetDefault("GEMINI_MODEL", "gemini-2.5-flash")
-	viper.SetDefault("ALERT_WHATSAPP_URL", "")
-	viper.SetDefault("ALERT_WHATSAPP_CHAT_ID", "")
 	viper.SetDefault("BITESHIP_API_KEY", "")
 	viper.SetDefault("BITESHIP_BASE_URL", "https://api.biteship.com")
 
@@ -82,9 +71,6 @@ func Load() (*Config, error) {
 		"MIDTRANS_SERVER_KEY", "MIDTRANS_CLIENT_KEY", "MIDTRANS_IS_PROD",
 		"UPLOAD_DIR", "BASE_URL", "CUSTOMER_URL", "ADMIN_URL",
 		"GEOCODER_URL", "GEOCODER_EMAIL",
-		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
-		"ALERT_FROM_EMAIL", "ALERT_TO_EMAIL",
-		"ALERT_WHATSAPP_URL", "ALERT_WHATSAPP_CHAT_ID",
 		"GEMINI_API_KEY", "GEMINI_MODEL",
 		"BITESHIP_API_KEY", "BITESHIP_BASE_URL",
 	} {

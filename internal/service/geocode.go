@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -98,11 +99,13 @@ func (g *geocoder) fetch(ctx context.Context, path string, params url.Values) ([
 
 	resp, err := g.client.Do(req)
 	if err != nil {
+		slog.ErrorContext(ctx, "geocoder upstream request failed", "path", path, "err", err)
 		return nil, fmt.Errorf("%w: %v", apperror.ErrGeocoderUnavailable, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		slog.ErrorContext(ctx, "geocoder upstream returned non-200", "path", path, "status", resp.StatusCode)
 		return nil, fmt.Errorf("%w: upstream status %d", apperror.ErrGeocoderUnavailable, resp.StatusCode)
 	}
 

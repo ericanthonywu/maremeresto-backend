@@ -430,3 +430,45 @@ func TestCreateOrderRequestCourierType(t *testing.T) {
 	}
 }
 
+func TestClientLogRequestValidate(t *testing.T) {
+	valid := ClientLogRequest{
+		App:      " Customer ",
+		Message:  "  Gagal memuat checkout  ",
+		TraceID:  "trace-123_abc:1/2",
+		Category: "",
+		Level:    "",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid log request, got %v", err)
+	}
+	if valid.App != "customer" || valid.Level != "error" || valid.Category != "runtime" {
+		t.Fatalf("unexpected normalized defaults: %+v", valid)
+	}
+	if valid.TraceID != "trace-123_abc:1/2" {
+		t.Fatalf("expected trace_id preserved, got %q", valid.TraceID)
+	}
+
+	forgedTrace := ClientLogRequest{
+		App:     "admin",
+		Level:   "warn",
+		Message: "WS warning",
+		TraceID: "bad trace\nforged",
+	}
+	if err := forgedTrace.Validate(); err != nil {
+		t.Fatalf("expected valid log request with forged trace cleared, got %v", err)
+	}
+	if forgedTrace.TraceID != "" {
+		t.Fatalf("expected invalid trace_id cleared, got %q", forgedTrace.TraceID)
+	}
+
+	badApp := ClientLogRequest{App: "mobile", Message: "boom"}
+	if err := badApp.Validate(); err == nil {
+		t.Error("expected invalid app to be rejected")
+	}
+
+	emptyMsg := ClientLogRequest{App: "customer", Message: "   "}
+	if err := emptyMsg.Validate(); err == nil {
+		t.Error("expected empty message to be rejected")
+	}
+}
+

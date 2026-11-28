@@ -43,3 +43,48 @@ func TestHandleBiteshipWebhook(t *testing.T) {
 		})
 	}
 }
+
+func TestPostClientLog(t *testing.T) {
+	ctrl := NewController(nil, nil, nil)
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "valid customer error",
+			body:       `{"app":"customer","level":"error","category":"api_error","message":"HTTP 500","trace_id":"fe-abc-123","http_status":500}`,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "valid admin warn",
+			body:       `{"app":"admin","level":"warn","category":"ws_error","message":"reconnecting"}`,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "invalid app",
+			body:       `{"app":"unknown","message":"oops"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid json",
+			body:       `{bad`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/client-logs", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			ctrl.PostClientLog(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("got status %d, want %d (body=%s)", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}

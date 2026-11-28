@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ericanthonywu/maremereso-olga/backend/internal/alert"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/config"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/controller"
 	"github.com/ericanthonywu/maremereso-olga/backend/internal/middleware"
@@ -15,13 +14,13 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(cfg *config.Config, ctrl *controller.Controller, alertSvc *alert.AlertService) chi.Router {
+func NewRouter(cfg *config.Config, ctrl *controller.Controller) chi.Router {
 	r := chi.NewRouter()
 
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.Logger)
-	r.Use(middleware.Recovery(alertSvc))
+	r.Use(middleware.Recovery)
 	r.Use(middleware.CORS(cfg))
 	r.Use(securityHeaders)
 
@@ -30,6 +29,7 @@ func NewRouter(cfg *config.Config, ctrl *controller.Controller, alertSvc *alert.
 	authLimiter := middleware.NewRateLimiter(10, 20) // 10 burst, 20/min
 	orderLimiter := middleware.NewRateLimiter(8, 30)
 	geocodeLimiter := middleware.NewRateLimiter(15, 40)
+	clientLogLimiter := middleware.NewRateLimiter(20, 60)
 
 	r.Get("/api/v1/health", ctrl.Health)
 
@@ -46,7 +46,7 @@ func NewRouter(cfg *config.Config, ctrl *controller.Controller, alertSvc *alert.
 	// Every route below is plain request/response, so a hard timeout is safe.
 	r.Group(func(rest chi.Router) {
 		rest.Use(chimw.Timeout(30 * time.Second))
-		registerRESTRoutes(rest, cfg, ctrl, authLimiter, orderLimiter, geocodeLimiter)
+		registerRESTRoutes(rest, cfg, ctrl, authLimiter, orderLimiter, geocodeLimiter, clientLogLimiter)
 	})
 
 	return r
@@ -56,7 +56,7 @@ func registerRESTRoutes(
 	r chi.Router,
 	cfg *config.Config,
 	ctrl *controller.Controller,
-	authLimiter, orderLimiter, geocodeLimiter *middleware.RateLimiter,
+	authLimiter, orderLimiter, geocodeLimiter, clientLogLimiter *middleware.RateLimiter,
 ) {
 	// ---- Public: storefront reads and the payment gateway callback ----
 	r.Group(func(public chi.Router) {
@@ -73,6 +73,12 @@ func registerRESTRoutes(
 		public.Post("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
 		public.Get("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
 		public.Head("/api/v1/webhooks/biteship", ctrl.HandleBiteshipWebhook)
+	})
+
+	// Frontend error log ingestion (rate-limited, unauthenticated so boot/chunk/guest errors are captured).
+	r.Group(func(telemetry chi.Router) {
+		telemetry.Use(clientLogLimiter.Middleware)
+		telemetry.Post("/api/v1/client-logs", ctrl.PostClientLog)
 	})
 
 	r.Group(func(limited chi.Router) {

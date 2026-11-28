@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -113,6 +114,7 @@ func (g *GeminiClient) GenerateFeedbackSummary(
 			successfulModel = modelName
 			break
 		}
+		slog.WarnContext(ctx, "gemini model attempt failed", "model", modelName, "err", err)
 		lastErr = err
 	}
 
@@ -121,6 +123,7 @@ func (g *GeminiClient) GenerateFeedbackSummary(
 		if lastErr != nil {
 			errMsg = fmt.Sprintf("Gagal menghubungi Google Gemini API: %v", lastErr)
 		}
+		slog.ErrorContext(ctx, "all gemini models failed", "branch", branchName, "err", lastErr)
 		return &dto.FeedbackAISummaryResponse{
 			Configured:  true,
 			Model:       g.model,
